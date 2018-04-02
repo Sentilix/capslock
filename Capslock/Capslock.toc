@@ -1,0 +1,6 @@
+## Title: Capslock
+## Version: 0.0.1
+## Author: Mimma @ VanillaGaming.org
+## Interface: 11200
+
+Capslock.xml

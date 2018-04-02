@@ -1,0 +1,39 @@
+﻿<Project DefaultTargets="Deploy" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Default</Configuration>
+    <Name>Capslock</Name>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>{b97cc13e-99f9-4365-87c7-5cde984fc11f}</ProjectGuid>
+    <AssemblyName>Capslock</AssemblyName>
+    <RootNamespace>Capslock</RootNamespace>
+    <WowPath>D:\Games\World of Warcraft 1.12.1\</WowPath>
+    <AddonTitle>Capslock</AddonTitle>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Default' ">
+    <OutputPath>.</OutputPath>
+  </PropertyGroup>
+  <Import Project="$(MSBuildExtensionsPath)\Microsoft\WowAddonStudio\2.0\WowAddonStudio.targets" />
+  <ItemGroup>
+    <Content Include="Capslock.toc">
+      <SubType>TableOfContents</SubType>
+    </Content>
+    <Content Include="Capslock.xml">
+      <SubType>Frame</SubType>
+    </Content>
+    <Content Include="Capslock.lua">
+      <SubType>Code</SubType>
+      <DependentUpon>Capslock.xml</DependentUpon>
+    </Content>
+    <Content Include="changelog.txt" />
+  </ItemGroup>
+  <!--
+	To modify your build process, add your task inside one of the targets below and uncomment it. 
+		
+	<Target Name="BeforeClean"></Target>
+	<Target Name="AfterClean"></Target>
+	<Target Name="BeforeRebuild"></Target>
+	<Target Name="AfterRebuild"></Target>
+	<Target Name="BeforeDeploy"></Target>
+	<Target Name="AfterDeploy"></Target>
+	-->
+</Project>

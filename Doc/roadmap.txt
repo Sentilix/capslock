@@ -1,0 +1,33 @@
+
+
+0.1.0
+- Version check
+
+0.2.0:
+- Can list people typing "123" in raid chat
+- Can summon selected target
+
+0.3.0:
+- Add configuration dialogue
+- Integrate with Titan panel
+- Can configure keyword
+- Can configure spam message
+
+0.4.0
+- Can communicate with other locks
+
+
+Unversioned:
+- Can check range?
+- Can check if inside (same) instance?
+- Can prioritize:
+	* Selected target
+	* Warlocks
+	* People far away
+	* People typing '123' first
+- Add random portal messages
+- Handle SS
+
+
+
+
