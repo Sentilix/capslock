@@ -12,6 +12,13 @@ Please see the ReadMe.txt for addon details.
 ]]
 
 
+-- TODO: add 100 yards range check to see there are at least 3 people!
+-- TODO: Check target is alive, online and not in combat.
+-- TODO: Ignore "!summon" messages from self (locks must not queue themself!)
+-- TODO: Ignore "!summon" for non-locks.
+-- TODO: Add party chat as well (is it covered by raid chat?)
+
+
 -- Channel settings:
 local PARTY_CHANNEL					= "PARTY"
 local RAID_CHANNEL					= "RAID"
@@ -19,6 +26,7 @@ local YELL_CHANNEL					= "YELL"
 local SAY_CHANNEL					= "SAY"
 local WARN_CHANNEL					= "RAID_WARNING"
 local GUILD_CHANNEL					= "GUILD"
+local WHISPER_CHANNEL				= "WHISPER"
 local CHAT_END						= "|r"
 local COLOUR_CHAT   				= "|c804060F0"
 local COLOUR_INTRO  				= "|c8080A0F8"
@@ -28,6 +36,14 @@ local CTRA_PREFIX					= "CTRA"
 
 local CAPSLOCK_CURRENT_VERSION		= 0
 local CAPSLOCK_UPDATE_MESSAGE_SHOWN = false
+
+
+
+
+-- List of people (in raid) requesting a summon.
+-- Format is: { <playername>, <priority> }
+local CAPSLOCK_SUMMON_QUEUE			= {}
+local CAPSLOCK_SUMMON_KEYWORD		= "123"
 
 
 
@@ -58,6 +74,19 @@ end
 function CAPSLOCK_Echo(msg)
 	echo("<"..COLOUR_INTRO.."CAPSLOCK"..COLOUR_CHAT.."> "..msg);
 end
+
+
+--[[
+	Whisper specific target with a message.
+]]
+local function whisper(receiver, msg)
+	if receiver == UnitName("player") then
+		gEcho(msg);
+	else
+		SendChatMessage(msg, WHISPER_CHANNEL, nil, receiver);
+	end
+end
+
 
 
 
@@ -112,7 +141,7 @@ SLASH_CAPSLOCK_SUMMON1 = "/capslocksummon"
 SLASH_CAPSLOCK_SUMMON2 = "/capslocksum"
 SLASH_CAPSLOCK_SUMMON3 = "/summon"
 SlashCmdList["CAPSLOCK_SUMMON"] = function(msg)
-	CAPSLOCK_Echo("*** Not implemented: CAPSLOCK_SUMMON");
+	CAPSLOCK_SummonPriorityTarget();
 end
 
 
@@ -238,6 +267,88 @@ function CAPSLOCK_IsInRaid()
 end
 
 
+--[[
+	Convert a msg so first letter is uppercase, and rest as lower case.
+]]
+local function UCFirst(msg)
+	if not msg then
+		return ""
+	end	
+
+	local f = string.sub(msg, 1, 1)
+	local r = string.sub(msg, 2)
+	return string.upper(f) .. string.lower(r)
+end
+
+
+function CAPSLOCK_SortTableAscending(sourcetable, index)
+	local doSort = true
+	while doSort do
+		doSort = false
+		for n=table.getn(sourcetable), 2, -1 do
+			local a = sourcetable[n - 1];
+			local b = sourcetable[n];
+			if (a[index]) > (b[index]) then
+				sourcetable[n - 1] = b;
+				sourcetable[n] = a;
+				doSort = true;
+			end
+		end
+	end
+	return sourcetable;
+end
+
+function CAPSLOCK_SortTableDescending(sourcetable, index)
+	local doSort = true
+	while doSort do
+		doSort = false
+		for n=1,table.getn(sourcetable) - 1, 1 do
+			local a = sourcetable[n]
+			local b = sourcetable[n + 1]
+			if (a[index]) < (b[index]) then
+				sourcetable[n] = b
+				sourcetable[n + 1] = a
+				doSort = true
+			end
+		end
+	end
+	return sourcetable;
+end
+
+function CAPSLOCK_RenumberTable(sourcetable)
+	local index = 1;
+	local temptable = { };
+	for key,value in ipairs(sourcetable) do
+		if value and table.getn(value) > 0 then
+			temptable[index] = value;
+			index = index + 1
+		end
+	end
+	return temptable;
+end
+
+
+function CAPSLOCK_GetUnitIDFromGroup(playerName)
+	playerName = UCFirst(playerName);
+
+	if CAPSLOCK_IsInRaid(false) then
+		for n=1, GetNumRaidMembers(), 1 do
+			if UnitName("raid"..n) == playerName then
+				return "raid"..n;
+			end
+		end
+	else
+		for n=1, GetNumPartyMembers(), 1 do
+			if UnitName("party"..n) == playerName then
+				return "party"..n;
+			end
+		end				
+	end
+	
+	return nil;	
+end
+
+
 
 
 --  *******************************************************
@@ -351,6 +462,132 @@ end
 
 --  *******************************************************
 --
+--	Queue functions
+--
+--  *******************************************************
+
+--[[
+	Add a player to the summon queue.
+	Added in: 0.0.2
+--]]
+function CAPSLOCK_AddToSummonQueue(playername, silentMode)
+	playername = UCFirst(playername);
+		
+	local q = CAPSLOCK_GetFromQueueByName(playername);
+	if q then
+		if not silentMode then
+			whisper(playername, "Patience, you are already queued for a summon!");
+		end;
+	else
+		local id = 1 + table.getn(CAPSLOCK_SUMMON_QUEUE);
+		-- Currently priority is always 10.
+		local priority = 10;
+		CAPSLOCK_SUMMON_QUEUE[id] = { playername, priority };
+		
+		if not silentMode then
+			whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
+		end;
+	end;	
+	
+	-- Debug: print out current queue:
+	--[[
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		q = CAPSLOCK_SUMMON_QUEUE[n];
+		echo(string.format("Queue: pos=%d, name=%s, prio=%d", n, q[1], q[2]));
+	end;
+	]]	
+end
+
+
+--[[
+	Get queue information for requested player.
+	Added in: 0.0.2
+--]]
+function CAPSLOCK_GetFromQueueByName(playername)
+	local q;
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		q = CAPSLOCK_SUMMON_QUEUE[n];
+		if q[1] == playername then
+			return q;
+		end
+	end
+	
+	return nil;
+end
+
+
+--[[
+	Get queue information for player with highest priority.
+	Added in: 0.0.2
+--]]
+function CAPSLOCK_GetFromQueueByPriority()
+	local entry = nil;
+	
+	if table.getn(CAPSLOCK_SUMMON_QUEUE) > 0 then	
+		CAPSLOCK_SortTableAscending(CAPSLOCK_SUMMON_QUEUE, 1);
+		
+		entry = CAPSLOCK_SUMMON_QUEUE[1];
+		CAPSLOCK_SUMMON_QUEUE[1] = nil;
+		
+		CAPSLOCK_RenumberTable(CAPSLOCK_SUMMON_QUEUE);
+	end
+	
+	return entry;
+end
+
+
+
+--  *******************************************************
+--
+--	Summon functions
+--
+--  *******************************************************
+function CAPSLOCK_SummonPriorityTarget()
+	if not CAPSLOCK_IsInRaid() and not CAPSLOCK_IsInParty() then
+		CAPSLOCK_Echo("You must be in a party or raid to summon!");
+		return;
+	end
+
+	if UnitAffectingCombat("player") then
+		CAPSLOCK_Echo("You cannot summon people while flagged for combat.");
+		return;
+	end
+	
+	local target = CAPSLOCK_GetFromQueueByPriority();
+	if not target then
+		CAPSLOCK_Echo("The summon queue is empty!");
+		return;
+	end
+
+	local unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
+	if not unitid then
+		CAPSLOCK_Echo(string.format("Oops, unable to find unitid for player %s", target[1]));
+		return;
+	end
+
+	CastSpellByName("Ritual of Summoning");
+	SpellTargetUnit(unitid)
+
+	if not SpellIsTargeting() then
+		CAPSLOCK_SendAddonMessage("TX_SUMBEGIN#"..target[1].."#");
+		CAPSLOCK_AnnounceResurrection(target[1]);
+	else
+		-- If summon did not succeed we must place player back in queue.	
+		SpellStopTargeting();
+		CAPSLOCK_AddToSummonQueue(target[1], true);
+	end
+end
+
+
+function CAPSLOCK_AnnounceResurrection(playername)
+	partyEcho(string.format("Summoning %s, please click the portal", playername));	
+	whisper(playername, "You will be summoned in 10 seconds - be ready.");
+end
+
+
+
+--  *******************************************************
+--
 --	Version functions
 --
 --  *******************************************************
@@ -395,12 +632,50 @@ function CAPSLOCK_CheckIsNewVersion(versionstring)
 end
 
 
+
+--[[
+--	Handle incoming chat whisper.
+--	"!" commands are redirected here too with the "raw" command line.
+--	Since 0.0.2
+--]]
+function CAPSLOCK_OnChatWhisper(event, message, sender)	
+	if not message then
+		return
+	end
+	
+	local _, _, cmd = string.find(message, "(%a+)");	
+	if not cmd then
+		return
+	end
+	cmd = string.lower(cmd);
+	
+	if cmd == "summon" then
+		CAPSLOCK_AddToSummonQueue(sender);
+	end;
+end	
+
+
+--[[
+--	There's a message in the Party / Raid channel - investigate that!
+--]]
+function CAPSLOCK_HandleRaidChatMessage(event, message, sender)
+	if not message or message == "" or not string.sub(message, 1, 1) == "!" then
+		return;
+	end
+
+	-- TODO: Check that I am a Warlock!
+	
+	local command = string.sub(message, 2)
+	CAPSLOCK_OnChatWhisper(event, command, sender);
+end
+
+
+
 --  *******************************************************
 --
 --	Event handlers
 --
 --  *******************************************************
-
 function CAPSLOCK_OnEvent(event)
 	if (event == "ADDON_LOADED") then
 		if arg1 == "Capslock" then
@@ -411,6 +686,10 @@ function CAPSLOCK_OnEvent(event)
 		CAPSLOCK_OnChatMsgAddon(event, arg1, arg2, arg3, arg4, arg5)
 	elseif (event == "RAID_ROSTER_UPDATE") then
 		CAPSLOCK_OnRaidRosterUpdate()
+	elseif (event == "CHAT_MSG_WHISPER") then
+		CAPSLOCK_OnChatWhisper(event, arg1, arg2, arg3, arg4, arg5);
+	elseif (event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER") then
+		CAPSLOCK_HandleRaidChatMessage(event, arg1, arg2, arg3, arg4, arg5);
 	end
 end
 
@@ -421,5 +700,9 @@ function CAPSLOCK_OnLoad()
     this:RegisterEvent("ADDON_LOADED");
     this:RegisterEvent("CHAT_MSG_ADDON");   
     this:RegisterEvent("RAID_ROSTER_UPDATE")
+    
+    this:RegisterEvent("CHAT_MSG_WHISPER");
+	this:RegisterEvent("CHAT_MSG_RAID");
+	this:RegisterEvent("CHAT_MSG_RAID_LEADER");
 end
 
