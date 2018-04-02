@@ -14,9 +14,8 @@ Please see the ReadMe.txt for addon details.
 
 -- TODO: add 100 yards range check to see there are at least 3 people!
 -- TODO: Check target is alive, online and not in combat.
--- TODO: Ignore "!summon" messages from self (locks must not queue themself!)
--- TODO: Ignore "!summon" for non-locks.
 -- TODO: Add party chat as well (is it covered by raid chat?)
+-- TODO: Seems summons always ends up with "Invalid target"; something isnt working!
 
 
 -- Channel settings:
@@ -44,6 +43,11 @@ local CAPSLOCK_UPDATE_MESSAGE_SHOWN = false
 -- Format is: { <playername>, <priority> }
 local CAPSLOCK_SUMMON_QUEUE			= {}
 local CAPSLOCK_SUMMON_KEYWORD		= "123"
+local CAPSLOCK_SUMMON_MAXVISIBLE	= 6
+local CAPSLOCK_SUMMON_MAXQUEUED		= 40
+-- TRUE if client reacts on "!summon", FALSE if not.
+-- This is triggered by the summoning UI being open or closed.
+local CAPSLOCK_SUMMON_ENABLED		= false;
 
 
 
@@ -81,7 +85,7 @@ end
 ]]
 local function whisper(receiver, msg)
 	if receiver == UnitName("player") then
-		gEcho(msg);
+		CAPSLOCK_Echo(msg);
 	else
 		SendChatMessage(msg, WHISPER_CHANNEL, nil, receiver);
 	end
@@ -169,7 +173,7 @@ end
 SLASH_CAPSLOCK_CONFIG1 = "/capslockconfig"
 SLASH_CAPSLOCK_CONFIG2 = "/capslockcfg"
 SlashCmdList["CAPSLOCK_CONFIG"] = function(msg)
-	CAPSLOCK_Echo("*** Not implemented: CAPSLOCK_CONFIG");		
+	CAPSLOCK_ToggleConfigurationDialog();
 end
 
 --[[
@@ -179,7 +183,7 @@ end
 ]]
 SLASH_CAPSLOCK_DISABLE1 = "/capslockdisable"
 SlashCmdList["CAPSLOCK_DISABLE"] = function(msg)
-	CAPSLOCK_Echo("*** Not implemented: CAPSLOCK_DISABLE");		
+	CAPSLOCK_ToggleConfigurationDialog();
 end
 
 --[[
@@ -242,10 +246,24 @@ end
 --	Configuration functions
 --
 --  *******************************************************
-function CAPSLOCK_ToggleConfigurationDialogue()
-	CAPSLOCK_Echo("TODO: Implement configuration dialogue");
+function CAPSLOCK_ToggleConfigurationDialog()
+	if CAPSLOCK_SUMMON_ENABLED then
+		CAPSLOCK_CloseConfigurationDialog();
+	else
+		CAPSLOCK_OpenConfigurationDialog();
+	end;
 end;
 
+function CAPSLOCK_OpenConfigurationDialog()
+	CAPSLOCK_SUMMON_ENABLED = true;
+	CAPSLOCK_UpdateMessageList();
+	CapslockFrame:Show();
+end;
+
+function CAPSLOCK_CloseConfigurationDialog()
+	CAPSLOCK_SUMMON_ENABLED = false;
+	CapslockFrame:Hide();
+end;
 
 
 
@@ -473,6 +491,14 @@ end
 function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 	playername = UCFirst(playername);
 		
+	if not CAPSLOCK_SUMMON_ENABLED then
+		return;
+	end;
+	
+	if not(UnitClass("player") == "Warlock") then
+		return;
+	end;
+		
 	local q = CAPSLOCK_GetFromQueueByName(playername);
 	if q then
 		if not silentMode then
@@ -488,7 +514,9 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 			whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
 		end;
 	end;	
-	
+
+	CAPSLOCK_UpdateMessageList();
+		
 	-- Debug: print out current queue:
 	--[[
 	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
@@ -527,13 +555,31 @@ function CAPSLOCK_GetFromQueueByPriority()
 		CAPSLOCK_SortTableAscending(CAPSLOCK_SUMMON_QUEUE, 1);
 		
 		entry = CAPSLOCK_SUMMON_QUEUE[1];
-		CAPSLOCK_SUMMON_QUEUE[1] = nil;
 		
-		CAPSLOCK_RenumberTable(CAPSLOCK_SUMMON_QUEUE);
+		local q
+		local newTable = { }
+		for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+			q = CAPSLOCK_SUMMON_QUEUE[n];
+			
+			if q and not(q[1] == entry[1]) then
+				newTable[table.getn(newTable)+1] = CAPSLOCK_SUMMON_QUEUE[n];
+			end;
+		end;
+		
+		CAPSLOCK_SUMMON_QUEUE = newTable;		
+		CAPSLOCK_UpdateMessageList();
 	end
 	
 	return entry;
 end
+
+function CAPSLOCK_AnnounceSummons()
+	local location = GetRealZoneText();
+	local message = string.format("<CAPSLOCK> Type \"!summon\" to be summoned to %s.", location);
+	
+	partyEcho(message);
+--	SendChatMessage(message, SAY_CHANNEL)
+end;
 
 
 
@@ -582,6 +628,80 @@ end
 function CAPSLOCK_AnnounceResurrection(playername)
 	partyEcho(string.format("Summoning %s, please click the portal", playername));	
 	whisper(playername, "You will be summoned in 10 seconds - be ready.");
+end
+
+
+function CAPSLOCK_OnTargetClick(object)
+	local index = object:GetID();
+	
+	echo(format.string("Index=%d", index));
+end;
+
+
+function CAPSLOCK_UpdateMessageList()
+	FauxScrollFrame_Update(CapslockFrameSummonQueue, CAPSLOCK_SUMMON_MAXQUEUED, 10, 20);
+	local offset = FauxScrollFrame_GetOffset(CapslockFrameSummonQueue);
+	
+	CAPSLOCK_RefreshVisibleSummonQueue(offset);
+end;
+
+
+function CAPSLOCK_InitializeListElements()
+	local entry = CreateFrame("Button", "$parentEntry1", CapslockFrameSummonQueue, "CAPSLOCK_CellTemplate");
+	entry:SetID(1);
+	entry:SetPoint("TOPLEFT", 4, -4);
+	for n=2, CAPSLOCK_SUMMON_MAXQUEUED, 1 do
+		local entry = CreateFrame("Button", "$parentEntry"..n, CapslockFrameSummonQueue, "CAPSLOCK_CellTemplate");
+		entry:SetID(n);
+		entry:SetPoint("TOP", "$parentEntry"..(n-1), "BOTTOM");
+	end
+end
+
+
+function CAPSLOCK_RefreshVisibleSummonQueue(offset)
+	local summons = CAPSLOCK_SUMMON_QUEUE;
+
+	CAPSLOCK_SortTableAscending(summons, 2);
+	
+	local summon, playername
+	for n=1, CAPSLOCK_SUMMON_MAXVISIBLE, 1 do
+		local frame = getglobal("CapslockFrameSummonQueueEntry"..n);
+		
+		playername = "";
+		
+		summon = summons[n + offset]
+		if summon then
+			playername = summon[1];
+					
+			local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);						
+			local cls = UnitClass(unitid);
+			local clsColor = { 1.00, 1.00,  1.00 }
+			if cls == "Druid" then
+				clsColor = { 1.00, 0.49, 0.04 }
+			elseif cls == "Hunter" then
+				clsColor = { 0.67, 0.83, 0.45 }
+			elseif cls == "Mage" then
+				clsColor = { 0.41, 0.80, 0.94 }
+			elseif cls == "Paladin" then
+				clsColor = { 0.96, 0.55, 0.73 }
+			elseif cls == "Priest" then
+				clsColor = { 1.00, 1.00, 1.00 }
+			elseif cls == "Rogue" then
+				clsColor = { 1.00, 0.96, 0.41 }
+			elseif cls == "Shaman" then
+				clsColor = { 0.96, 0.55, 0.73 }
+			elseif cls == "Warlock" then
+				clsColor = { 0.58, 0.51, 0.79 }
+			elseif cls == "Warrior" then
+				clsColor = { 0.78, 0.61, 0.43 }
+			end;			
+			
+			getglobal(frame:GetName().."Target"):SetTextColor(clsColor[1], clsColor[2], clsColor[3]);			
+		end
+		
+		getglobal(frame:GetName().."Target"):SetText(playername);
+		frame:Show();			
+	end
 end
 
 
@@ -642,13 +762,18 @@ function CAPSLOCK_OnChatWhisper(event, message, sender)
 	if not message then
 		return
 	end
+
+	-- Skip messages from self:
+	if sender == UnitName("player") then
+		return;
+	end;
 	
 	local _, _, cmd = string.find(message, "(%a+)");	
 	if not cmd then
 		return
 	end
 	cmd = string.lower(cmd);
-	
+
 	if cmd == "summon" then
 		CAPSLOCK_AddToSummonQueue(sender);
 	end;
@@ -663,8 +788,6 @@ function CAPSLOCK_HandleRaidChatMessage(event, message, sender)
 		return;
 	end
 
-	-- TODO: Check that I am a Warlock!
-	
 	local command = string.sub(message, 2)
 	CAPSLOCK_OnChatWhisper(event, command, sender);
 end
@@ -677,15 +800,15 @@ end
 --
 --  *******************************************************
 function CAPSLOCK_OnEvent(event)
-	if (event == "ADDON_LOADED") then
-		if arg1 == "Capslock" then
+--	if (event == "ADDON_LOADED") then
+--		if arg1 == "Capslock" then
 --		    CAPSLOCK_InitializeConfigSettings();
-			CAPSLOCK_Echo("TODO: Initialize config settings");
-		end		
-	elseif (event == "CHAT_MSG_ADDON") then
+--		end		
+--	else
+	if (event == "CHAT_MSG_ADDON") then
 		CAPSLOCK_OnChatMsgAddon(event, arg1, arg2, arg3, arg4, arg5)
-	elseif (event == "RAID_ROSTER_UPDATE") then
-		CAPSLOCK_OnRaidRosterUpdate()
+--	elseif (event == "RAID_ROSTER_UPDATE") then
+--		CAPSLOCK_OnRaidRosterUpdate()
 	elseif (event == "CHAT_MSG_WHISPER") then
 		CAPSLOCK_OnChatWhisper(event, arg1, arg2, arg3, arg4, arg5);
 	elseif (event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER") then
@@ -697,12 +820,16 @@ function CAPSLOCK_OnLoad()
 	CAPSLOCK_CURRENT_VERSION = CAPSLOCK_CalculateVersion( GetAddOnMetadata("Capslock", "Version") );
 
 	CAPSLOCK_Echo(string.format("version %s by %s", GetAddOnMetadata("Capslock", "Version"), GetAddOnMetadata("Capslock", "Author")));
-    this:RegisterEvent("ADDON_LOADED");
-    this:RegisterEvent("CHAT_MSG_ADDON");   
-    this:RegisterEvent("RAID_ROSTER_UPDATE")
-    
-    this:RegisterEvent("CHAT_MSG_WHISPER");
-	this:RegisterEvent("CHAT_MSG_RAID");
-	this:RegisterEvent("CHAT_MSG_RAID_LEADER");
+	
+	if UnitClass("player") == "Warlock" then	
+		this:RegisterEvent("ADDON_LOADED");
+		this:RegisterEvent("CHAT_MSG_ADDON");   
+		this:RegisterEvent("RAID_ROSTER_UPDATE")    
+		this:RegisterEvent("CHAT_MSG_WHISPER");
+		this:RegisterEvent("CHAT_MSG_RAID");
+		this:RegisterEvent("CHAT_MSG_RAID_LEADER");
+		
+		CAPSLOCK_InitializeListElements();		
+	end
 end
 

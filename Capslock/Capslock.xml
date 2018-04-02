@@ -1,11 +1,192 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <Script file="Capslock.lua" />
+	<Script file="Capslock.lua" />
 
+	<!-- template for Message list entries -->
+	<Button name="CAPSLOCK_CellTemplate" hidden="true" virtual="true">
+		<Size>
+			<AbsDimension x="144" y="16"/>
+		</Size>
+		<Layers>
+			<Layer>
+				<FontString name="$parentTarget" justifyH="LEFT" inherits="GameFontNormal">
+					<Size>
+						<AbsDimension x="140" y="16"/>
+					</Size>
+					<Anchors>
+						<Anchor point="LEFT">
+							<Offset>
+								<AbsDimension x="4" y="0"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnClick>
+				CAPSLOCK_OnTargetClick(this)
+				PlaySound("igMainMenuOptionCheckBoxOn")
+			</OnClick>
+			<OnEnter>
+				getglobal(this:GetName().."BG"):SetVertexColor(1, 1, 1, 1)
+			</OnEnter>
+			<OnLeave>
+				getglobal(this:GetName().."BG"):SetVertexColor(0.7, 0.7, 0.7, 0.7)
+			</OnLeave>
+			<OnLoad>
+				this:GetScript("OnLeave")(this)
+			</OnLoad>
+		</Scripts>
+		<NormalTexture name="$parentBG">
+			<Color r="0.0" g="0.0" b="0.5" a="0.5"/>
+		</NormalTexture>
+	</Button>
+
+	<!-- Main configuration frame -->
+	<Frame name="CapslockFrame" parent="UIParent" toplevel="true" hidden="true">
+		<Size>
+			<AbsDimension x="200" y="220" />
+		</Size>
+		<Anchors>
+			<Anchor point="TOPLEFT">
+				<Offset x="312" y="-118" />
+			</Anchor>
+		</Anchors>
+		<Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+			<BackgroundInsets>
+				<AbsInset left="11" right="12" top="12" bottom="11" />
+			</BackgroundInsets>
+			<TileSize>
+				<AbsValue val="32" />
+			</TileSize>
+			<EdgeSize>
+				<AbsValue val="32" />
+			</EdgeSize>
+		</Backdrop>
+		<Frames>
+			<!-- Message list frame -->
+			<ScrollFrame name="$parentSummonQueue" inherits="FauxScrollFrameTemplate">
+				<Size>
+					<AbsDimension x="150" y="106"/>
+				</Size>
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset>
+							<AbsDimension x="16" y="-24"/>
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<Backdrop edgeFile="Interface\Tooltips\UI-Tooltip-Border" tile="true">
+					<EdgeSize>
+						<AbsValue val="16"/>
+					</EdgeSize>
+					<TileSize>
+						<AbsValue val="16"/>
+					</TileSize>
+				</Backdrop>
+				<Scripts>
+					<OnVerticalScroll>
+						FauxScrollFrame_OnVerticalScroll(6, CAPSLOCK_UpdateMessageList);
+					</OnVerticalScroll>
+					<OnShow>
+						CAPSLOCK_UpdateMessageList();
+					</OnShow>
+				</Scripts>
+			</ScrollFrame>
+
+			<!-- Summon button -->
+			<Button name="SummonButton" inherits="UIPanelButtonTemplate" movable="true" text="Summon next">
+				<Size>
+					<AbsDimension x="160" y="23" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset x="20" y="-128" />
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						CAPSLOCK_SummonPriorityTarget();
+					</OnClick>
+				</Scripts>
+			</Button>
+			<!-- Announce button -->
+			<Button name="AnnounceButton" inherits="UIPanelButtonTemplate" movable="true" text="Announce Summons">
+				<Size>
+					<AbsDimension x="160" y="23" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset x="20" y="-154" />
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						CAPSLOCK_AnnounceSummons();
+					</OnClick>
+				</Scripts>
+			</Button>
+			<!-- Close button -->
+			<Button name="CloseButton" inherits="UIPanelButtonTemplate" movable="true" text="Close Summoning">
+				<Size>
+					<AbsDimension x="160" y="23" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset x="20" y="-180" />
+					</Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>
+						CAPSLOCK_CloseConfigurationDialog();
+					</OnClick>
+				</Scripts>
+			</Button>
+		</Frames>
+		<Layers>
+			<Layer level="ARTWORK">
+				<Texture name="$parentHeaderTexture" file="Interface\DialogFrame\UI-DialogBox-Header">
+					<Size>
+						<AbsDimension x="256" y="64"/>
+					</Size>
+					<Anchors>
+						<Anchor point="TOP">
+							<Offset>
+								<AbsDimension x="0" y="12"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</Texture>
+				<FontString inherits="GameFontNormal" text="Summon Queue">
+					<Anchors>
+						<Anchor point="TOP" relativeTo="$parentHeaderTexture">
+							<Offset>
+								<AbsDimension x="0" y="-14"/>
+							</Offset>
+						</Anchor>
+					</Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Scripts>
+			<OnLoad>
+				this:SetMovable(true)
+				this:SetUserPlaced(true)
+				this:RegisterForDrag("LeftButton")
+			</OnLoad>
+			<OnDragStart>
+				this:StartMoving()
+			</OnDragStart>
+			<OnDragStop>
+				this:StopMovingOrSizing()
+			</OnDragStop>
+		</Scripts>
+	</Frame>
 
 	<!-- Titan Panel Button (optional) -->
 	<Frame parent="UIParent" hide="true">
 		<Frames>
-			<Button name="TitanPanelCapslockButton" inherits="TitanPanelIconTemplate" frameStrata="FULLSCREEN" toplevel="true">
+			<Button name="CAPSLOCK_TitanPanelButton" inherits="TitanPanelIconTemplate" frameStrata="FULLSCREEN" toplevel="true">
 				<Scripts>
 					<OnLoad>
 						if TitanPanelButton_OnLoad then
@@ -15,7 +196,7 @@
 					</OnLoad>
 					<OnClick>
 						if arg1 == "LeftButton" then
-						CAPSLOCK_ToggleConfigurationDialogue();
+						CAPSLOCK_ToggleConfigurationDialog();
 						end
 						TitanPanelButton_OnClick(arg1);
 					</OnClick>
