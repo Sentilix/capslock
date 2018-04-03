@@ -1,0 +1,25 @@
+﻿<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<Script file="CapslockTitanPanel.lua" />
+
+	<!-- Titan Panel Button (optional) -->
+	<Frame parent="UIParent">
+		<Frames>
+			<Button name="TitanPanelCapslockButton" inherits="TitanPanelIconTemplate" frameStrata="FULLSCREEN" toplevel="true">
+				<Scripts>
+					<OnLoad>
+						if TitanPanelButton_OnLoad then
+						TitanPanelCapslockButton_OnLoad();
+						end
+					</OnLoad>
+					<OnClick>
+						if arg1 == "LeftButton" then
+						CAPSLOCK_ToggleConfigurationDialog();
+						end
+						TitanPanelButton_OnClick(arg1);
+					</OnClick>
+				</Scripts>
+			</Button>
+		</Frames>
+	</Frame>
+
+</Ui>

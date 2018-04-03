@@ -24,6 +24,13 @@
       <SubType>Code</SubType>
       <DependentUpon>Capslock.xml</DependentUpon>
     </Content>
+    <Content Include="CapslockTitanPanel.lua">
+      <SubType>Code</SubType>
+      <DependentUpon>CapslockTitanPanel.xml</DependentUpon>
+    </Content>
+    <Content Include="CapslockTitanPanel.xml">
+      <SubType>Frame</SubType>
+    </Content>
     <Content Include="changelog.txt" />
   </ItemGroup>
   <!--

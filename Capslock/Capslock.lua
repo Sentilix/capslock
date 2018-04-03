@@ -29,9 +29,17 @@ local WHISPER_CHANNEL				= "WHISPER"
 local CHAT_END						= "|r"
 local COLOUR_CHAT   				= "|c804060F0"
 local COLOUR_INTRO  				= "|c8080A0F8"
-local CAPSLOCK_NAME					= "Capslock"
 local CAPSLOCK_PREFIX				= "Capslockv1"
 local CTRA_PREFIX					= "CTRA"
+
+-- To be configurable:
+--	Update player status each 5 second:
+CAPSLOCK_OPTION_PLAYER_UPDATE		= 5;
+
+-- Globals:
+CAPSLOCK_TITAN_ID					= "Capslock"
+CAPSLOCK_TITAN_TITLE				= "CAPSLOCK"
+CAPSLOCK_AND_TITAN_LOADED			= 0
 
 local CAPSLOCK_CURRENT_VERSION		= 0
 local CAPSLOCK_UPDATE_MESSAGE_SHOWN = false
@@ -40,7 +48,8 @@ local CAPSLOCK_UPDATE_MESSAGE_SHOWN = false
 
 
 -- List of people (in raid) requesting a summon.
--- Format is: { <playername>, <priority> }
+-- Format is: { <playername>, <priority>, <playerstatus> }
+-- Player status: 0=ready, 1=Offline, 2=Dead, 3=Not in Instance
 local CAPSLOCK_SUMMON_QUEUE			= {}
 local CAPSLOCK_SUMMON_KEYWORD		= "123"
 local CAPSLOCK_SUMMON_MAXVISIBLE	= 6
@@ -214,29 +223,6 @@ SlashCmdList["CAPSLOCK_HELP"] = function(msg)
 	CAPSLOCK_Echo("    Enable       Enable CAPSLOCK summon messages again.");
 	CAPSLOCK_Echo("    Help         This help.");
 	CAPSLOCK_Echo("    Version      Request version info from all clients.");
-end
-
-
-
---  *******************************************************
---
---	Titan Panel integration
---
---  *******************************************************
-function CAPSLOCK_TitanPanelButton_OnLoad()
-    this.registry = {
-        id = CAPSLOCK_NAME,
-        menuText = CAPSLOCK_NAME,
-        buttonTextFunction = nil,
-        tooltipTitle = CAPSLOCK_NAME .. " Options",
-        tooltipTextFunction = "CAPSLOCK_TitanPanelButton_GetTooltipText",
-        frequency = 0,
-	    icon = "Interface\\Icons\\Spell_Shadow_Twilight"
-    };
-end
-
-function CAPSLOCK_TitanPanelButton_GetTooltipText()
-    return "Click to toggle configuration panel";
 end
 
 
@@ -457,24 +443,24 @@ end
 --	Timer functions
 --
 --  *******************************************************
-local Timers = {}
-local TimerTick = 0
+local CAPSLOCK_TimerTick = 0;
+local CAPSLOCK_LocationTimer = 0;
 
 function CAPSLOCK_OnTimer(elapsed)
-	TimerTick = TimerTick + elapsed
+	CAPSLOCK_TimerTick = CAPSLOCK_TimerTick + elapsed
 
-	for n=1,table.getn(Timers),1 do
-		local timer = Timers[n]
-		if TimerTick > timer[2] then
-			Timers[n] = nil
-			timer[1]()
-		end
+	if floor(CAPSLOCK_LocationTimer) < floor(CAPSLOCK_TimerTick) then
+		CAPSLOCK_OnLocationTimer();
+		CAPSLOCK_LocationTimer = CAPSLOCK_TimerTick + (CAPSLOCK_OPTION_PLAYER_UPDATE - 1);
 	end
 end
 
-function CAPSLOCK_GetTimerTick()
-	return TimerTick;
+function CAPSLOCK_OnLocationTimer()
+	if CAPSLOCK_SUMMON_ENABLED then
+		CAPSLOCK_UpdateMessageList();
+	end;
 end
+
 
 
 
@@ -508,10 +494,22 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 		local id = 1 + table.getn(CAPSLOCK_SUMMON_QUEUE);
 		-- Currently priority is always 10.
 		local priority = 10;
-		CAPSLOCK_SUMMON_QUEUE[id] = { playername, priority };
+		CAPSLOCK_SUMMON_QUEUE[id] = { playername, priority, 0 };
 		
 		if not silentMode then
-			whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
+			local lockInstance = CAPSLOCK_GetInstanceName(GetRealZoneText());
+			local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);
+			local status = CAPSLOCK_GetPlayerStatus(lockInstance, unitid);
+		
+			if status == 1 then
+				-- Player is disconnected; don't send a message.
+			elseif status == 2 then
+				whisper(playername, string.format("Hi %s, you will be summoned when you are alive.", playername));
+			elseif status == 3 then
+				whisper(playername, string.format("Hi %s, you will be summoned when you are inside %s.", playername, lockInstance));
+			else
+				whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
+			end	
 		end;
 	end;	
 
@@ -521,7 +519,7 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 	--[[
 	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
 		q = CAPSLOCK_SUMMON_QUEUE[n];
-		echo(string.format("Queue: pos=%d, name=%s, prio=%d", n, q[1], q[2]));
+		echo(string.format("Queue: pos=%d, name=%s, prio=%d, status=%d", n, q[1], q[2], q[3]));
 	end;
 	]]	
 end
@@ -532,11 +530,11 @@ end
 	Added in: 0.0.2
 --]]
 function CAPSLOCK_GetFromQueueByName(playername)
-	local q;
+	local target;
 	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
-		q = CAPSLOCK_SUMMON_QUEUE[n];
-		if q[1] == playername then
-			return q;
+		target = CAPSLOCK_SUMMON_QUEUE[n];
+		if target[1] == playername then
+			return target;
 		end
 	end
 	
@@ -550,35 +548,99 @@ end
 --]]
 function CAPSLOCK_GetFromQueueByPriority()
 	local entry = nil;
+	local target;
+
+	CAPSLOCK_UpdateQueueStatus();
+	CAPSLOCK_SortTableAscending(CAPSLOCK_SUMMON_QUEUE, 1);
 	
-	if table.getn(CAPSLOCK_SUMMON_QUEUE) > 0 then	
-		CAPSLOCK_SortTableAscending(CAPSLOCK_SUMMON_QUEUE, 1);
-		
-		entry = CAPSLOCK_SUMMON_QUEUE[1];
-		
-		local q
-		local newTable = { }
-		for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
-			q = CAPSLOCK_SUMMON_QUEUE[n];
-			
-			if q and not(q[1] == entry[1]) then
-				newTable[table.getn(newTable)+1] = CAPSLOCK_SUMMON_QUEUE[n];
-			end;
-		end;
-		
-		CAPSLOCK_SUMMON_QUEUE = newTable;		
-		CAPSLOCK_UpdateMessageList();
-	end
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		target = CAPSLOCK_SUMMON_QUEUE[n];			
+		if target[3] == 0 then
+			entry = target;
+			break;
+		end;	
+	end;
+
+	-- If we found a target we will remove it from the table:		
+	if entry then
+		CAPSLOCK_RemoveFromQueue(entry[1]);
+	end;
+	
+	CAPSLOCK_UpdateMessageList();
 	
 	return entry;
+end;
+
+
+function CAPSLOCK_RemoveFromQueue(playername)
+	local target
+	local newTable = { }
+	
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		target = CAPSLOCK_SUMMON_QUEUE[n];
+		
+		if target and not(target[1] == playername) then
+			newTable[table.getn(newTable)+1] = CAPSLOCK_SUMMON_QUEUE[n];
+		end;
+	end;
+
+	CAPSLOCK_SUMMON_QUEUE = newTable;
+end;
+
+
+--[[
+	Return player status for one player: 
+	0=ready, 1=Offline, 2=Dead, 3=Not in Instance
+	Added in: 0.1.1
+--]]
+function CAPSLOCK_GetPlayerStatus(lockInstance, unitid)
+	-- Status 1: Unit is offline
+	if not UnitIsConnected(unitid) then
+		return 1;
+	end;
+
+	-- Status 2: Unit is dead!
+	if UnitIsDeadOrGhost(unitid) then
+		return 2;
+	end;
+	
+	-- Status 3: lock is in an instance but target is not!
+	if lockInstance then
+		local targetZone = CAPSLOCK_GetPlayerZone(UnitName(unitid));
+		if not(lockInstance == targetZone) then
+			return 3;
+		end;		
+	end;
+	
+	return 0;
 end
+
+
+--[[
+	Return player status for all players in queue:
+	0=ready, 1=Offline, 2=Dead, 3=Not in Instance
+	Added in: 0.1.1
+--]]
+function CAPSLOCK_UpdateQueueStatus()
+	local lockInstance = CAPSLOCK_GetInstanceName(GetRealZoneText());
+	local status, unitid;
+	
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		target = CAPSLOCK_SUMMON_QUEUE[n];
+		unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
+		
+		target[3] = CAPSLOCK_GetPlayerStatus(lockInstance, unitid);
+		
+		CAPSLOCK_SUMMON_QUEUE[n] = target;
+	end;
+end;
+
 
 function CAPSLOCK_AnnounceSummons()
 	local location = GetRealZoneText();
 	local message = string.format("<CAPSLOCK> Type \"!summon\" to be summoned to %s.", location);
 	
 	partyEcho(message);
---	SendChatMessage(message, SAY_CHANNEL)
 end;
 
 
@@ -588,7 +650,13 @@ end;
 --	Summon functions
 --
 --  *******************************************************
-function CAPSLOCK_SummonPriorityTarget()
+
+--[[
+	Summon next target in priority.
+	(optional) playername: set if specific player is to be summoned.
+	Added in: 0.0.2
+--]]
+function CAPSLOCK_SummonPriorityTarget(playername)
 	if not CAPSLOCK_IsInRaid() and not CAPSLOCK_IsInParty() then
 		CAPSLOCK_Echo("You must be in a party or raid to summon!");
 		return;
@@ -598,12 +666,19 @@ function CAPSLOCK_SummonPriorityTarget()
 		CAPSLOCK_Echo("You cannot summon people while flagged for combat.");
 		return;
 	end
-	
-	local target = CAPSLOCK_GetFromQueueByPriority();
-	if not target then
-		CAPSLOCK_Echo("The summon queue is empty!");
-		return;
-	end
+
+	local target;
+	if playername then
+		target = { playername, 0, 0 };
+		CAPSLOCK_RemoveFromQueue(target[1]);
+		CAPSLOCK_UpdateMessageList();		
+	else
+		target = CAPSLOCK_GetFromQueueByPriority();
+		if not target then
+			CAPSLOCK_Echo("The summon queue is empty!");
+			return;
+		end;
+	end;
 
 	local unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
 	if not unitid then
@@ -611,31 +686,53 @@ function CAPSLOCK_SummonPriorityTarget()
 		return;
 	end
 
+	TargetUnit(unitid);
 	CastSpellByName("Ritual of Summoning");
-	SpellTargetUnit(unitid)
 
 	if not SpellIsTargeting() then
 		CAPSLOCK_SendAddonMessage("TX_SUMBEGIN#"..target[1].."#");
-		CAPSLOCK_AnnounceResurrection(target[1]);
+		CAPSLOCK_AnnounceSummoning(target[1]);
 	else
 		-- If summon did not succeed we must place player back in queue.	
-		SpellStopTargeting();
+		echo("*** Unsuccessful summon!!!");
 		CAPSLOCK_AddToSummonQueue(target[1], true);
 	end
 end
 
 
-function CAPSLOCK_AnnounceResurrection(playername)
-	partyEcho(string.format("Summoning %s, please click the portal", playername));	
+--[[
+	Summon specific target.
+	Added in: 0.1.1
+--]]
+function CAPSLOCK_OnTargetClick(object, buttonname)
+	currentObjectId = object:GetID();
+	
+	local frame = getglobal("CapslockFrameSummonQueueEntry"..currentObjectId);
+	local playername = getglobal(frame:GetName().."Target"):GetText();
+
+	if buttonname == "RightButton" then
+		-- Right button: Remove player from queue
+		CAPSLOCK_RemoveFromQueue(playername);
+		CAPSLOCK_UpdateMessageList();				
+	else
+		-- Left button: Summon immediately (regardless of status)
+		if not(playername == "") then
+			CAPSLOCK_SummonPriorityTarget(playername);
+		end;
+	end
+
+
+end;
+
+
+function CAPSLOCK_AnnounceSummoning(playername)
+	local message = string.format("Summoning %s, please click the portal", playername);
+--	partyEcho(message);	
+--	SendChatMessage(message, SAY_CHANNEL)
+	SendChatMessage(message, YELL_CHANNEL)
+
 	whisper(playername, "You will be summoned in 10 seconds - be ready.");
 end
-
-
-function CAPSLOCK_OnTargetClick(object)
-	local index = object:GetID();
-	
-	echo(format.string("Index=%d", index));
-end;
 
 
 function CAPSLOCK_UpdateMessageList()
@@ -661,9 +758,11 @@ end
 function CAPSLOCK_RefreshVisibleSummonQueue(offset)
 	local summons = CAPSLOCK_SUMMON_QUEUE;
 
+	CAPSLOCK_UpdateQueueStatus();
+
 	CAPSLOCK_SortTableAscending(summons, 2);
 	
-	local summon, playername
+	local summon, playername, playerprio, playerstatus;
 	for n=1, CAPSLOCK_SUMMON_MAXVISIBLE, 1 do
 		local frame = getglobal("CapslockFrameSummonQueueEntry"..n);
 		
@@ -672,29 +771,40 @@ function CAPSLOCK_RefreshVisibleSummonQueue(offset)
 		summon = summons[n + offset]
 		if summon then
 			playername = summon[1];
-					
-			local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);						
-			local cls = UnitClass(unitid);
-			local clsColor = { 1.00, 1.00,  1.00 }
-			if cls == "Druid" then
-				clsColor = { 1.00, 0.49, 0.04 }
-			elseif cls == "Hunter" then
-				clsColor = { 0.67, 0.83, 0.45 }
-			elseif cls == "Mage" then
-				clsColor = { 0.41, 0.80, 0.94 }
-			elseif cls == "Paladin" then
-				clsColor = { 0.96, 0.55, 0.73 }
-			elseif cls == "Priest" then
-				clsColor = { 1.00, 1.00, 1.00 }
-			elseif cls == "Rogue" then
-				clsColor = { 1.00, 0.96, 0.41 }
-			elseif cls == "Shaman" then
-				clsColor = { 0.96, 0.55, 0.73 }
-			elseif cls == "Warlock" then
-				clsColor = { 0.58, 0.51, 0.79 }
-			elseif cls == "Warrior" then
-				clsColor = { 0.78, 0.61, 0.43 }
-			end;			
+			playerprio = summon[2];
+			playerstatus = summon[3];
+
+			local clsColor = { 1.00, 1.00,  1.00 }		
+			if playerstatus == 1 then		-- Offline
+				clsColor = { 0.50, 0.50,  0.50 }
+			elseif playerstatus == 2 then	-- Dead
+				clsColor = { 1.00, 0.00,  0.00 }			
+			elseif playerstatus == 3 then	-- Not in instance
+				clsColor = { 1.00, 0.00,  1.00 }
+			else
+				-- Use class colour
+				local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);						
+				local cls = UnitClass(unitid);
+				if cls == "Druid" then
+					clsColor = { 1.00, 0.49, 0.04 }
+				elseif cls == "Hunter" then
+					clsColor = { 0.67, 0.83, 0.45 }
+				elseif cls == "Mage" then
+					clsColor = { 0.41, 0.80, 0.94 }
+				elseif cls == "Paladin" then
+					clsColor = { 0.96, 0.55, 0.73 }
+				elseif cls == "Priest" then
+					clsColor = { 1.00, 1.00, 1.00 }
+				elseif cls == "Rogue" then
+					clsColor = { 1.00, 0.96, 0.41 }
+				elseif cls == "Shaman" then
+					clsColor = { 0.96, 0.55, 0.73 }
+				elseif cls == "Warlock" then
+					clsColor = { 0.58, 0.51, 0.79 }
+				elseif cls == "Warrior" then
+					clsColor = { 0.78, 0.61, 0.43 }
+				end;			
+			end;		
 			
 			getglobal(frame:GetName().."Target"):SetTextColor(clsColor[1], clsColor[2], clsColor[3]);			
 		end
@@ -704,6 +814,39 @@ function CAPSLOCK_RefreshVisibleSummonQueue(offset)
 	end
 end
 
+
+--  *******************************************************
+--
+--	Location functions
+--
+--  *******************************************************
+
+--[[
+	Return name of Instance (if any).
+	Used to filter out chars not in the instance.
+	Added in: 0.1.1
+--]]
+function CAPSLOCK_GetInstanceName(location)
+	if location == "The Stockade" then
+		return location;
+	end;
+
+	return nil;
+end;
+
+
+function CAPSLOCK_GetPlayerZone(playername)
+	if CAPSLOCK_IsInRaid() then
+		for n=1, GetNumRaidMembers(), 1 do
+			local name, _, _, _, _, _, zone = GetRaidRosterInfo(n);
+			if name == playername then
+				return zone;
+			end
+		end
+	end;
+	
+	return nil;
+end;
 
 
 --  *******************************************************

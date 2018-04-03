@@ -24,7 +24,7 @@
 		</Layers>
 		<Scripts>
 			<OnClick>
-				CAPSLOCK_OnTargetClick(this)
+				CAPSLOCK_OnTargetClick(this, arg1)
 				PlaySound("igMainMenuOptionCheckBoxOn")
 			</OnClick>
 			<OnEnter>
@@ -34,6 +34,10 @@
 				getglobal(this:GetName().."BG"):SetVertexColor(0.7, 0.7, 0.7, 0.7)
 			</OnLeave>
 			<OnLoad>
+				this:RegisterForClicks(
+				"LeftButtonDown",
+				"RightButtonDown"
+				)
 				this:GetScript("OnLeave")(this)
 			</OnLoad>
 		</Scripts>
@@ -181,28 +185,6 @@
 				this:StopMovingOrSizing()
 			</OnDragStop>
 		</Scripts>
-	</Frame>
-
-	<!-- Titan Panel Button (optional) -->
-	<Frame parent="UIParent" hide="true">
-		<Frames>
-			<Button name="CAPSLOCK_TitanPanelButton" inherits="TitanPanelIconTemplate" frameStrata="FULLSCREEN" toplevel="true">
-				<Scripts>
-					<OnLoad>
-						if TitanPanelButton_OnLoad then
-						CAPSLOCK_TitanPanelButton_OnLoad();
-						TitanPanelButton_OnLoad();
-						end
-					</OnLoad>
-					<OnClick>
-						if arg1 == "LeftButton" then
-						CAPSLOCK_ToggleConfigurationDialog();
-						end
-						TitanPanelButton_OnClick(arg1);
-					</OnClick>
-				</Scripts>
-			</Button>
-		</Frames>
 	</Frame>
 	
 	<!-- Dummy event frame -->
