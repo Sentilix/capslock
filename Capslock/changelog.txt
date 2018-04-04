@@ -1,24 +1,28 @@
 
 Changelog:
 
-Release 0.1.1 (2018-04-03)
+Release 0.3.x (2018-04-04)
 --------------------------
+* Added synchronization between locks in raid
 
 
-Release 0.0.3 (2018-04-02)
+Release 0.2.x (2018-04-03)
 --------------------------
-* Tested in the wild (and failed!)
+* Added zones and locations
+* Finalized slash commands
 
 
-Release 0.0.2 (2018-04-02)
+Release 0.1.x (2018-04-03)
 --------------------------
-* Added summon functionality ("!summon")
+* Added UI
+* Added summoning queue
 
 
-Release 0.0.1 (2018-04-02)
+Release 0.0.x (2018-04-02)
 --------------------------
 Initial version:
+* Tested in the wild (and failed!)
+* Added summon functionality ("!summon")
 * Added support for Titan Panel
 * Added initial framework (no underlying functionality yet)
-
 

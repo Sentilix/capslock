@@ -20,9 +20,7 @@ function TitanPanelCapslockButton_OnLoad()
 
 	CAPSLOCK_AND_TITAN_LOADED = CAPSLOCK_IsTitanDMLoaded();
 
-	if CAPSLOCK_AND_TITAN_LOADED == 3 then
-		CAPSLOCK_Echo("Registering CAPSLOCK in Titan");
-		
+	if CAPSLOCK_AND_TITAN_LOADED == 3 then	
 		this.registry = {
 			id = CAPSLOCK_TITAN_ID,
 			category = "General",

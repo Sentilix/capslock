@@ -12,6 +12,9 @@ Please see the ReadMe.txt for addon details.
 ]]
 
 
+-- TODO: Add "/resummon" or "/requeue" to put last summoned target back in queue manually.
+-- TODO: Add "summon master", so targets are not spam-whispered!
+
 
 -- Channel settings:
 local PARTY_CHANNEL					= "PARTY"
@@ -27,6 +30,9 @@ local COLOUR_INTRO  				= "|c8080A0F8"
 local CAPSLOCK_PREFIX				= "Capslockv1"
 local CTRA_PREFIX					= "CTRA"
 
+--	Sync.state: 0=idle, 1=initializing, 2=synchronizing
+local synchronizationState			= 0;
+local synchronizationSource			= "";
 -- To be configurable:
 --	Update player status each <n> second:
 CAPSLOCK_OPTION_PLAYER_UPDATE		= 2;
@@ -56,8 +62,9 @@ local CAPSLOCK_SUMMON_ENABLED		= false;
 
 
 --[[
-	Echo a message for the local user only.
-]]
+--	Echo a message for the local user only.
+--	Added in: 0.0.1
+--]]
 local function echo(msg)
 	if not msg then
 		msg = ""
@@ -66,9 +73,10 @@ local function echo(msg)
 end
 
 --[[
-	Echo in raid chat (if in raid) or party chat (if not)
-]]
-local function partyEcho(msg)
+--	Echo in raid chat (if in raid) or party chat (if not)
+--	Added in: 0.0.1
+--]]
+function CAPSLOCK_PartyEcho(msg)
 	if CAPSLOCK_IsInRaid() then
 		SendChatMessage(msg, RAID_CHANNEL)
 	elseif CAPSLOCK_IsInParty() then
@@ -77,17 +85,19 @@ local function partyEcho(msg)
 end
 
 --[[
-	Echo a message for the local user only, including CAPSLOCK "logo"
-]]
+--	Echo a message for the local user only, including CAPSLOCK "logo"
+--	Added in: 0.0.1
+--]]
 function CAPSLOCK_Echo(msg)
 	echo("<"..COLOUR_INTRO.."CAPSLOCK"..COLOUR_CHAT.."> "..msg);
 end
 
 
 --[[
-	Whisper specific target with a message.
-]]
-local function whisper(receiver, msg)
+--	Whisper specific target with a message.
+--	Added in: 0.0.1
+--]]
+ function CAPSLOCK_Whisper(receiver, msg)
 	if receiver == UnitName("player") then
 		CAPSLOCK_Echo(msg);
 	else
@@ -348,6 +358,40 @@ function CAPSLOCK_GetUnitIDFromGroup(playerName)
 end
 
 
+function CAPSLOCK_AddToQueue(element)
+	if not element[1] then
+		return;
+	end;
+
+	-- Check if player is already listed in queue:
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		if CAPSLOCK_SUMMON_QUEUE[n][1] == element[1] then
+			return false;
+		end;
+	end;
+	
+	CAPSLOCK_SUMMON_QUEUE[table.getn(CAPSLOCK_SUMMON_QUEUE) + 1] = element;
+	return true;
+end;
+
+
+function CAPSLOCK_RemoveFromQueue(playername)
+	local target;
+	local newTable = { };
+	
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		target = CAPSLOCK_SUMMON_QUEUE[n];
+		
+		if target and not(target[1] == playername) then
+			newTable[table.getn(newTable)+1] = CAPSLOCK_SUMMON_QUEUE[n];
+		end;
+	end;
+
+	CAPSLOCK_SUMMON_QUEUE = newTable;
+end;
+
+
+
 
 
 --  *******************************************************
@@ -382,6 +426,46 @@ end
 
 
 --[[
+	Handle incoming message from other CAPSLOCK clients.
+	Added in: 0.0.1
+--]]
+function CAPSLOCK_HandleCapslockMessage(msg, sender)
+	--echo(sender.." --> "..msg);
+	local _, _, cmd, message, recipient = string.find(msg, "([^#]*)#([^#]*)#([^#]*)");	
+	
+	--	Ignore message if it is not for me. 
+	--	Receipient can be blank, which means it is for everyone.
+	if not (recipient == "") then
+		if not (recipient == UnitName("player")) then
+			return
+		end
+	end
+
+	if cmd == "TX_VERSION" then
+		HandleTXVersion(message, sender)
+	elseif cmd == "RX_VERSION" then
+		HandleRXVersion(message, sender)		
+	elseif cmd == "TX_SYNCINIT" then
+		CAPSLOCK_HandleTXSyncInit(message, sender)
+	elseif cmd == "RX_SYNCINIT" then
+		CAPSLOCK_HandleRXSyncInit(message, sender)
+	elseif cmd == "TX_SYNCADDQ" then
+		CAPSLOCK_HandleTXSyncAddQueue(message, sender)
+	elseif cmd == "TX_SYNCREMQ" then
+		CAPSLOCK_HandleTXSyncRemoveQueue(message, sender)
+	elseif cmd == "TX_SYNCSUMQ" then
+		CAPSLOCK_HandleTXSyncSummonQueue(message, sender)
+	elseif cmd == "RX_SYNCSUMQ" then
+		CAPSLOCK_HandleRXSyncSummonQueue(message, sender)
+	elseif cmd == "TX_SUMBEGIN" then
+		CAPSLOCK_HandleRXSyncStartSummon(message, sender)
+	elseif cmd == "TX_VERCHECK" then
+		HandleTXVerCheck(message, sender)
+	end
+end
+
+
+--[[
 	Respond to a TX_VERSION command.
 	Input:
 		msg is the raw message
@@ -408,28 +492,154 @@ local function HandleTXVerCheck(message, sender)
 end
 
 
-function CAPSLOCK_HandleCapslockMessage(msg, sender)
---	echo(sender.." --> "..msg);
-	local _, _, cmd, message, recipient = string.find(msg, "([^#]*)#([^#]*)#([^#]*)");	
-	
-	--	Ignore message if it is not for me. 
-	--	Receipient can be blank, which means it is for everyone.
-	if not (recipient == "") then
-		if not (recipient == UnitName("player")) then
-			return
-		end
+function CAPSLOCK_Synchronize()
+	--	This initiates step 1: send a TX_SYNCINIT to all clients.
+	if synchronizationState == 0 then	
+		synchronizationState = 1			-- Set INIT mode
+		synchronizationSource = "";			-- Clear current source
+		
+		CAPSLOCK_SendAddonMessage("TX_SYNCINIT##");
+		
+		CAPSLOCK_AddTimer(CAPSLOCK_HandleRXSyncInitDone, 3);
+	end;
+end
+
+
+--[[
+--	Client received a TX_SYNCINIT request. This means sender is looking
+--	for clients to sync data from.
+--	This client must respond with a RX_SYNCINIT. A "0" is added as payload,
+--	and is reserved for future use.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleTXSyncInit(message, sender)
+	--	Message was from SELF, we must not return RX_SYNCINIT.
+	if sender == UnitName("player") then
+		return;
 	end
 
-	if cmd == "TX_VERSION" then
-		HandleTXVersion(message, sender)
-	elseif cmd == "RX_VERSION" then
-		HandleRXVersion(message, sender)
---	elseif cmd == "TX_SUMBEGIN" then
---		HandleTXSumBegin(message, sender)
-	elseif cmd == "TX_VERCHECK" then
-		HandleTXVerCheck(message, sender)
-	end
+	syncResults = { };
+	syncRQResults = { };
+
+	CAPSLOCK_SendAddonMessage("RX_SYNCINIT#0#"..sender)
 end
+
+--[[
+	Handle RX_SYNCINIT responses from clients.
+	A client responded back! We'll just pick the first client and
+	fetch data from him/her!
+--]]
+function CAPSLOCK_HandleRXSyncInit(message, sender)
+	--	Check we are still in TX_SYNCINIT state
+	if not (synchronizationState == 1) then
+		return
+	end
+
+	synchronizationState = 2;
+	synchronizationSource = sender;
+end
+
+
+--[[
+--	TX_SYNCADDQ: Add one element to summon queue.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleTXSyncAddQueue(message, sender)
+	local _, _, playername, priority = string.find(message, "([^/]*)/([^/]*)");
+
+	playername = CAPSLOCK_UCFirst(playername);
+	priority = tonumber(priority);
+
+	CAPSLOCK_AddToQueue({ playername, priority, 0, ""});
+	
+	CAPSLOCK_UpdateMessageList();
+end
+
+
+--[[
+--	Remove target from summon queue.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleTXSyncRemoveQueue(message, sender)
+	local _, _, playername = string.find(message, "([^/]*)");
+
+	CAPSLOCK_RemoveFromQueue(playername);
+end;
+
+--[[
+--	TX_SYNCSUMQ: Sync all elements in summon queue to sender.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleTXSyncSummonQueue(message, sender)
+	local playername, priority;
+	local response;
+
+	-- { <playername>, <priority>, <playerstatus>, <location> }
+	-- No reason to sync playerstatus or location; they will be updated by client.
+	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+		playername = CAPSLOCK_SUMMON_QUEUE[n][1];
+		priority = CAPSLOCK_SUMMON_QUEUE[n][2];
+
+		response = playername.."/"..priority;
+		CAPSLOCK_SendAddonMessage("RX_SYNCSUMQ#"..response.."#"..sender);
+	end
+
+	--	Last, send an EOF to signal all records were sent.
+	CAPSLOCK_SendAddonMessage("RX_SYNCSUMQ#EOF#"..sender);
+end
+
+
+--[[
+--	RX_SYNCSUMQ: Handle receiving data from client.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleRXSyncSummonQueue(message, sender)
+	if message == "EOF" then
+		synchronizationState = 0;
+		CAPSLOCK_UpdateMessageList();
+		return;
+	end
+
+	local _, _, playername, priority = string.find(message, "([^/]*)/([^/]*)");
+
+	playername = CAPSLOCK_UCFirst(playername);
+	priority = tonumber(priority);
+
+	CAPSLOCK_AddToQueue({ playername, priority, 0, ""});
+end
+
+
+--[[
+--	A client started to summon; remove this entry from queue.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleRXSyncStartSummon(message, sender)
+	local _, _, playername = string.find(message, "([^/]*)");
+
+	CAPSLOCK_RemoveFromQueue(playername);
+end;
+
+
+--[[
+--	This is called by the timer when responses are no longer accepted
+--	After this, responses must be investigated and we can read data from
+--	the selected (the first) source.
+--	Added in: 0.3.0
+--]]
+function CAPSLOCK_HandleRXSyncInitDone()
+	synchronizationState = 2;			-- We are in SYNC mode
+	
+	if synchronizationSource == "" then
+		synchronizationState = 0;		-- Back to IDLE mode
+		return;
+	end;
+
+	-- Now ask for details from the selected source:
+	CAPSLOCK_SendAddonMessage("TX_SYNCSUMQ##"..synchronizationSource);	
+end;
+
+
+
 
 
 
@@ -440,6 +650,8 @@ end
 --  *******************************************************
 local CAPSLOCK_TimerTick = 0;
 local CAPSLOCK_LocationTimer = 0;
+--	Timer job: { method, duration }
+local CAPSLOCK_GeneralTimers = { };
 
 function CAPSLOCK_OnTimer(elapsed)
 	CAPSLOCK_TimerTick = CAPSLOCK_TimerTick + elapsed
@@ -448,6 +660,15 @@ function CAPSLOCK_OnTimer(elapsed)
 		CAPSLOCK_OnLocationTimer();
 		CAPSLOCK_LocationTimer = CAPSLOCK_TimerTick + (CAPSLOCK_OPTION_PLAYER_UPDATE - 1);
 	end
+	
+	local timer;
+	for n=1, table.getn(CAPSLOCK_GeneralTimers), 1 do
+		timer = CAPSLOCK_GeneralTimers[n];
+		if (CAPSLOCK_TimerTick > timer[2]) then
+			CAPSLOCK_GeneralTimers[n] = nil;
+			timer[1]();
+		end
+	end	
 end
 
 function CAPSLOCK_OnLocationTimer()
@@ -456,6 +677,9 @@ function CAPSLOCK_OnLocationTimer()
 	end;
 end
 
+function CAPSLOCK_AddTimer( method, duration )
+	CAPSLOCK_GeneralTimers[table.getn(CAPSLOCK_GeneralTimers) + 1] = { method, CAPSLOCK_TimerTick + duration }
+end
 
 
 
@@ -480,7 +704,7 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 	local q = CAPSLOCK_GetFromQueueByName(playername);
 	if q then
 		if not silentMode then
-			whisper(playername, "Patience, you are already queued for a summon!");
+			CAPSLOCK_Whisper(playername, "Patience, you are already queued for a summon!");
 		end;
 	else
 		local id = 1 + table.getn(CAPSLOCK_SUMMON_QUEUE);
@@ -500,16 +724,20 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 			if status == 1 then
 				-- Player is disconnected; don't send a message.
 			elseif status == 2 then
-				whisper(playername, string.format("Hi %s, you will be summoned when you are alive.", playername));
+				CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned when you are alive.", playername));
 			elseif status == 3 then
-				whisper(playername, string.format("Hi %s, you will be summoned when you are inside %s.", playername, lockInstance));
+				CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned when you are inside %s.", playername, lockInstance));
 			else
-				whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
+				CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
 			end	
 		end;
 	end;	
 
 	CAPSLOCK_UpdateMessageList();
+	
+	local priority = 10;
+	CAPSLOCK_SendAddonMessage(string.format("TX_SYNCADDQ#%s/%d#", playername, priority));
+
 		
 	-- Debug: print out current queue:
 	--[[
@@ -559,28 +787,13 @@ function CAPSLOCK_GetFromQueueByPriority()
 
 	-- If we found a target we will remove it from the table:		
 	if entry then
+		CAPSLOCK_SendAddonMessage(string.format("TX_SYNCREMQ#%s#", entry[1]));
 		CAPSLOCK_RemoveFromQueue(entry[1]);
 	end;
 	
 	CAPSLOCK_UpdateMessageList();
 	
 	return entry;
-end;
-
-
-function CAPSLOCK_RemoveFromQueue(playername)
-	local target
-	local newTable = { }
-	
-	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
-		target = CAPSLOCK_SUMMON_QUEUE[n];
-		
-		if target and not(target[1] == playername) then
-			newTable[table.getn(newTable)+1] = CAPSLOCK_SUMMON_QUEUE[n];
-		end;
-	end;
-
-	CAPSLOCK_SUMMON_QUEUE = newTable;
 end;
 
 
@@ -641,7 +854,7 @@ function CAPSLOCK_AnnounceSummons()
 	local location = GetRealZoneText();
 	local message = string.format("<CAPSLOCK> Type \"!summon\" to be summoned to %s.", location);
 	
-	partyEcho(message);
+	CAPSLOCK_PartyEcho(message);
 end;
 
 
@@ -676,9 +889,9 @@ function CAPSLOCK_SummonPriorityTarget(playername)
 
 	local target;
 	if playername then
-		target = { playername, 0, 0 };
+		target = { playername, 0, 0 , ""};	
 		CAPSLOCK_RemoveFromQueue(target[1]);
-		CAPSLOCK_UpdateMessageList();		
+		CAPSLOCK_UpdateMessageList();
 	else
 		target = CAPSLOCK_GetFromQueueByPriority();
 		if not target then
@@ -692,6 +905,9 @@ function CAPSLOCK_SummonPriorityTarget(playername)
 		end;
 	end;
 
+	-- This will remove the target from other locks as well:
+	CAPSLOCK_SendAddonMessage("TX_SUMBEGIN#"..target[1].."#");
+
 	local unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
 	if not unitid then
 		CAPSLOCK_Echo(string.format("Oops, unable to find unitid for player %s", target[1]));
@@ -701,14 +917,7 @@ function CAPSLOCK_SummonPriorityTarget(playername)
 	TargetUnit(unitid);
 	CastSpellByName("Ritual of Summoning");
 
-	if not SpellIsTargeting() then
-		CAPSLOCK_SendAddonMessage("TX_SUMBEGIN#"..target[1].."#");
-		CAPSLOCK_AnnounceSummoning(target[1]);
-	else
-		-- If summon did not succeed we must place player back in queue.	
-		echo("*** Unsuccessful summon!!!");
-		CAPSLOCK_AddToSummonQueue(target[1], true);
-	end
+	CAPSLOCK_AnnounceSummoning(target[1]);
 end
 
 
@@ -722,8 +931,13 @@ function CAPSLOCK_OnTargetClick(object, buttonname)
 	local frame = getglobal("CapslockFrameSummonQueueEntry"..currentObjectId);
 	local playername = getglobal(frame:GetName().."Target"):GetText();
 
+	if not playername or (playername == "") then
+		return;
+	end;
+
 	if buttonname == "RightButton" then
 		-- Right button: Remove player from queue
+		CAPSLOCK_SendAddonMessage(string.format("TX_SYNCREMQ#%s#", playername));
 		CAPSLOCK_RemoveFromQueue(playername);
 		CAPSLOCK_UpdateMessageList();				
 	else
@@ -732,8 +946,6 @@ function CAPSLOCK_OnTargetClick(object, buttonname)
 			CAPSLOCK_SummonPriorityTarget(playername);
 		end;
 	end
-
-
 end;
 
 
@@ -744,11 +956,9 @@ end;
 --]]
 function CAPSLOCK_AnnounceSummoning(playername)
 	local message = string.format("Summoning %s, please click the portal", playername);
---	partyEcho(message);	
---	SendChatMessage(message, SAY_CHANNEL)
 	SendChatMessage(message, YELL_CHANNEL)
 
-	whisper(playername, "You will be summoned in 10 seconds - be ready.");
+	CAPSLOCK_Whisper(playername, "You will be summoned in 10 seconds - be ready.");
 end
 
 
@@ -895,6 +1105,7 @@ function CAPSLOCK_CountNearbyPlayers()
 end;
 
 
+
 --  *******************************************************
 --
 --	Version functions
@@ -941,7 +1152,6 @@ function CAPSLOCK_CheckIsNewVersion(versionstring)
 end
 
 
-
 --[[
 --	Handle incoming chat whisper.
 --	"!" commands are redirected here too with the "raw" command line.
@@ -983,21 +1193,15 @@ end
 
 
 
+
 --  *******************************************************
 --
 --	Event handlers
 --
 --  *******************************************************
 function CAPSLOCK_OnEvent(event)
---	if (event == "ADDON_LOADED") then
---		if arg1 == "Capslock" then
---		    CAPSLOCK_InitializeConfigSettings();
---		end		
---	else
 	if (event == "CHAT_MSG_ADDON") then
 		CAPSLOCK_OnChatMsgAddon(event, arg1, arg2, arg3, arg4, arg5)
---	elseif (event == "RAID_ROSTER_UPDATE") then
---		CAPSLOCK_OnRaidRosterUpdate()
 	elseif (event == "CHAT_MSG_WHISPER") then
 		CAPSLOCK_OnChatWhisper(event, arg1, arg2, arg3, arg4, arg5);
 	elseif (event == "CHAT_MSG_RAID" or 
@@ -1022,6 +1226,8 @@ function CAPSLOCK_OnLoad()
 		this:RegisterEvent("CHAT_MSG_RAID_LEADER");
 		
 		CAPSLOCK_InitializeListElements();		
+		
+		CAPSLOCK_Synchronize();
 	end
 end
 
