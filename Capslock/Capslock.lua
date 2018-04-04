@@ -12,9 +12,6 @@ Please see the ReadMe.txt for addon details.
 ]]
 
 
--- TODO: add 100 yards range check to see there are at least 3 people!
--- TODO: Add party chat as well (is it covered by raid chat?)
-
 
 -- Channel settings:
 local PARTY_CHANNEL					= "PARTY"
@@ -142,16 +139,29 @@ end
 --[[
 	Summon highest priority target.
 	Syntax: /capslocksummon
-	Alternatives: /capslock sum, /capslock summon, /summon
+	Alternatives: /capssum, /summon
+	If a playername is added, he/she will be added to summon queue.
 	Added in: 0.0.1
 ]]
 SLASH_CAPSLOCK_SUMMON1 = "/capslocksummon"
-SLASH_CAPSLOCK_SUMMON2 = "/capslocksum"
-SLASH_CAPSLOCK_SUMMON3 = "/capssum"
-SLASH_CAPSLOCK_SUMMON4 = "/summon"
+SLASH_CAPSLOCK_SUMMON2 = "/capssum"
+SLASH_CAPSLOCK_SUMMON3 = "/summon"
 SlashCmdList["CAPSLOCK_SUMMON"] = function(msg)
 	if CAPSLOCK_IsWarlock() then
-		CAPSLOCK_SummonPriorityTarget();
+		
+		local _, _, playername = string.find(msg, "(%S*)");
+		if playername == "" then
+			CAPSLOCK_SummonPriorityTarget();
+		else
+			-- If no zone, then this player is not in the party/raid.
+			playername = CAPSLOCK_UCFirst(playername);
+			local zone = CAPSLOCK_GetPlayerZone(playername);
+			if zone then
+				CAPSLOCK_AddToSummonQueue(playername, true);
+			else
+				CAPSLOCK_Echo(string.format("%s is not in the raid/party!", playername));
+			end;		
+		end;
 	end;
 end
 
@@ -259,7 +269,7 @@ end
 --[[
 	Convert a msg so first letter is uppercase, and rest as lower case.
 ]]
-local function UCFirst(msg)
+function CAPSLOCK_UCFirst(msg)
 	if not msg then
 		return ""
 	end	
@@ -318,7 +328,7 @@ end
 
 
 function CAPSLOCK_GetUnitIDFromGroup(playerName)
-	playerName = UCFirst(playerName);
+	playerName = CAPSLOCK_UCFirst(playerName);
 
 	if CAPSLOCK_IsInRaid(false) then
 		for n=1, GetNumRaidMembers(), 1 do
@@ -465,7 +475,7 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 		return;
 	end;
 
-	playername = UCFirst(playername);
+	playername = CAPSLOCK_UCFirst(playername);
 		
 	local q = CAPSLOCK_GetFromQueueByName(playername);
 	if q then
@@ -658,6 +668,12 @@ function CAPSLOCK_SummonPriorityTarget(playername)
 		return;
 	end
 
+	local nearbyCount = CAPSLOCK_CountNearbyPlayers();
+	if nearbyCount < 3 then
+		CAPSLOCK_Echo("There are not enough clickers nearby, please wait with summons.");
+		return;
+	end;
+
 	local target;
 	if playername then
 		target = { playername, 0, 0 };
@@ -721,6 +737,11 @@ function CAPSLOCK_OnTargetClick(object, buttonname)
 end;
 
 
+--[[
+	Announce summon instructions in party/raid.
+	Will check if there are at least 3 persons within 100 yards range.
+	Added in: 0.0.1
+--]]
 function CAPSLOCK_AnnounceSummoning(playername)
 	local message = string.format("Summoning %s, please click the portal", playername);
 --	partyEcho(message);	
@@ -828,7 +849,11 @@ end
 --
 --  *******************************************************
 
-
+--[[
+	Return zonename where <playername> currently is.
+	Returned value is nil if no zone was found (e.g. due to being offline).
+	Added in: 0.1.0
+--]]
 function CAPSLOCK_GetPlayerZone(playername)
 	if CAPSLOCK_IsInRaid() then
 		for n=1, GetNumRaidMembers(), 1 do
@@ -840,6 +865,33 @@ function CAPSLOCK_GetPlayerZone(playername)
 	end;
 	
 	return nil;
+end;
+
+
+--[[
+	Count how many players are within visible range (100 yards).
+	Added in: 0.2.3
+--]]
+function CAPSLOCK_CountNearbyPlayers()
+	local counter = 0;
+	local unitid;
+
+	if CAPSLOCK_IsInRaid() then
+		for n=1, GetNumRaidMembers(), 1 do
+			unitid = "raid"..n;
+			if UnitIsVisible(unitid) and not UnitIsDeadOrGhost(unitid) then
+				counter = counter + 1;
+			end;
+		end
+	elseif CAPSLOCK_IsInParty() then
+		for n=1, GetNumPartyMembers(), 1 do
+			if UnitIsVisible(unitid) and not UnitIsDeadOrGhost(unitid) then
+				counter = counter + 1;
+			end;
+		end
+	end;
+
+	return counter;
 end;
 
 
@@ -948,7 +1000,9 @@ function CAPSLOCK_OnEvent(event)
 --		CAPSLOCK_OnRaidRosterUpdate()
 	elseif (event == "CHAT_MSG_WHISPER") then
 		CAPSLOCK_OnChatWhisper(event, arg1, arg2, arg3, arg4, arg5);
-	elseif (event == "CHAT_MSG_RAID" or event == "CHAT_MSG_RAID_LEADER") then
+	elseif (event == "CHAT_MSG_RAID" or 
+			event == "CHAT_MSG_RAID_LEADER" or
+			event == "CHAT_MSG_PARTY") then
 		CAPSLOCK_HandleRaidChatMessage(event, arg1, arg2, arg3, arg4, arg5);
 	end
 end
@@ -963,6 +1017,7 @@ function CAPSLOCK_OnLoad()
 		this:RegisterEvent("CHAT_MSG_ADDON");   
 		this:RegisterEvent("RAID_ROSTER_UPDATE")    
 		this:RegisterEvent("CHAT_MSG_WHISPER");
+		this:RegisterEvent("CHAT_MSG_PARTY");
 		this:RegisterEvent("CHAT_MSG_RAID");
 		this:RegisterEvent("CHAT_MSG_RAID_LEADER");
 		
