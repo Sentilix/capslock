@@ -4,13 +4,13 @@
 	<!-- template for Message list entries -->
 	<Button name="CAPSLOCK_CellTemplate" hidden="true" virtual="true">
 		<Size>
-			<AbsDimension x="144" y="16"/>
+			<AbsDimension x="244" y="16"/>
 		</Size>
 		<Layers>
 			<Layer>
 				<FontString name="$parentTarget" justifyH="LEFT" inherits="GameFontNormal">
 					<Size>
-						<AbsDimension x="140" y="16"/>
+						<AbsDimension x="80" y="16"/>
 					</Size>
 					<Anchors>
 						<Anchor point="LEFT">
@@ -18,6 +18,14 @@
 								<AbsDimension x="4" y="0"/>
 							</Offset>
 						</Anchor>
+					</Anchors>
+				</FontString>
+				<FontString name="$parentZone" justifyH="CENTER" inherits="GameFontNormal">
+					<Size>
+						<AbsDimension x="160" y="16"/>
+					</Size>
+					<Anchors>
+						<Anchor point="LEFT" relativePoint="RIGHT" relativeTo="$parentTarget"/>
 					</Anchors>
 				</FontString>
 			</Layer>
@@ -49,7 +57,7 @@
 	<!-- Main configuration frame -->
 	<Frame name="CapslockFrame" parent="UIParent" toplevel="true" hidden="true">
 		<Size>
-			<AbsDimension x="200" y="220" />
+			<AbsDimension x="300" y="220" />
 		</Size>
 		<Anchors>
 			<Anchor point="TOPLEFT">
@@ -71,7 +79,7 @@
 			<!-- Message list frame -->
 			<ScrollFrame name="$parentSummonQueue" inherits="FauxScrollFrameTemplate">
 				<Size>
-					<AbsDimension x="150" y="106"/>
+					<AbsDimension x="250" y="106"/>
 				</Size>
 				<Anchors>
 					<Anchor point="TOPLEFT">
@@ -105,7 +113,7 @@
 				</Size>
 				<Anchors>
 					<Anchor point="TOPLEFT">
-						<Offset x="20" y="-128" />
+						<Offset x="70" y="-128" />
 					</Anchor>
 				</Anchors>
 				<Scripts>
@@ -121,7 +129,7 @@
 				</Size>
 				<Anchors>
 					<Anchor point="TOPLEFT">
-						<Offset x="20" y="-154" />
+						<Offset x="70" y="-154" />
 					</Anchor>
 				</Anchors>
 				<Scripts>
@@ -137,7 +145,7 @@
 				</Size>
 				<Anchors>
 					<Anchor point="TOPLEFT">
-						<Offset x="20" y="-180" />
+						<Offset x="70" y="-180" />
 					</Anchor>
 				</Anchors>
 				<Scripts>

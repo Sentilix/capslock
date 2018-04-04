@@ -13,6 +13,11 @@ Holds integration to TitanPanel (optional)
 --
 --  *******************************************************
 function TitanPanelCapslockButton_OnLoad()
+	-- Hide CAPSLOCK icon for all but Warlocks:
+	if not CAPSLOCK_IsWarlock() then
+		return;
+	end;
+
 	CAPSLOCK_AND_TITAN_LOADED = CAPSLOCK_IsTitanDMLoaded();
 
 	if CAPSLOCK_AND_TITAN_LOADED == 3 then
