@@ -12,10 +12,6 @@ Please see the ReadMe.txt for addon details.
 ]]
 
 
--- TODO: Add "/resummon" or "/requeue" to put last summoned target back in queue manually.
--- TODO: Add "summon master", so targets are not spam-whispered!
-
-
 -- Channel settings:
 local PARTY_CHANNEL					= "PARTY"
 local RAID_CHANNEL					= "RAID"
@@ -45,9 +41,6 @@ CAPSLOCK_AND_TITAN_LOADED			= 0
 local CAPSLOCK_CURRENT_VERSION		= 0
 local CAPSLOCK_UPDATE_MESSAGE_SHOWN = false
 
-
-
-
 -- List of people (in raid) requesting a summon.
 -- Format is: { <playername>, <priority>, <playerstatus>, <location> }
 -- Player status: 0=ready, 1=Offline, 2=Dead, 3=Not in Instance
@@ -55,8 +48,7 @@ local CAPSLOCK_SUMMON_QUEUE			= {}
 local CAPSLOCK_SUMMON_KEYWORD		= "123"
 local CAPSLOCK_SUMMON_MAXVISIBLE	= 6
 local CAPSLOCK_SUMMON_MAXQUEUED		= 40
--- TRUE if client reacts on "!summon", FALSE if not.
--- This is triggered by the summoning UI being open or closed.
+-- TRUE if summon dialog is open. "!summon" will always be accepted/queued.
 local CAPSLOCK_SUMMON_ENABLED		= false;
 
 
@@ -115,29 +107,32 @@ end
 --  *******************************************************
 
 --[[
-	Main entry for CAPSLOCK.
-	This will send the request to one of the sub slash commands.
-	Syntax: /capslock [option, defaulting to "summon"]
-	Added in: 0.0.1
-]]
+--	Main entry for CAPSLOCK.
+--	This will send the request to one of the sub slash commands.
+--	Syntax: /capslock [option, defaulting to "summon"]
+--	Added in: 0.0.1
+--]]
 SLASH_CAPSLOCK_CAPSLOCK1 = "/capslock"
 SLASH_CAPSLOCK_CAPSLOCK2 = "/caps"
 SlashCmdList["CAPSLOCK_CAPSLOCK"] = function(msg)
 	local _, _, option = string.find(msg, "(%S*)")
 
 	if not option or option == "" then
-		option = "OPEN"
+		option = "TOGGLE"
 	end
-	option = string.upper(option);
-		
+	option = string.upper(option);	
 		
 	if (option == "SUM" or option == "SUMMON") then
 		SlashCmdList["CAPSLOCK_SUMMON"]();
-	elseif option == "OPEN" then
+	elseif option == "SHOW" then
+		SlashCmdList["CAPSLOCK_SHOW_SUMMON"]();
+	elseif option == "HIDE" then
+		SlashCmdList["CAPSLOCK_HIDE_SUMMON"]();
+	elseif option == "TOGGLE" then
 		SlashCmdList["CAPSLOCK_TOGGLE_SUMMON"]();
 	elseif option == "HELP" then
 		SlashCmdList["CAPSLOCK_HELP"]();
-	elseif option == "VERSION" then
+	elseif (option == "VER") or (option == "VERSION") then
 		SlashCmdList["CAPSLOCK_VERSION"]();
 	else
 		CAPSLOCK_Echo(string.format("Unknown command: %s", option));
@@ -147,12 +142,12 @@ end
 
 
 --[[
-	Summon highest priority target.
-	Syntax: /capslocksummon
-	Alternatives: /capssum, /summon
-	If a playername is added, he/she will be added to summon queue.
-	Added in: 0.0.1
-]]
+--	Summon highest priority target.
+--	Syntax: /capslocksummon
+--	Alternatives: /capssum, /summon
+--	If a playername is added, he/she will be added to summon queue.
+--	Added in: 0.0.1
+--]]
 SLASH_CAPSLOCK_SUMMON1 = "/capslocksummon"
 SLASH_CAPSLOCK_SUMMON2 = "/capssum"
 SLASH_CAPSLOCK_SUMMON3 = "/summon"
@@ -177,11 +172,10 @@ end
 
 
 --[[
-	Request client version information
-	Syntax: /capslockversion
-	Alternative: /capslock version
-	Added in: 0.0.1
-]]
+--	Request client version information
+--	Syntax: /capslockversion
+--	Added in: 0.0.1
+--]]
 SLASH_CAPSLOCK_VERSION1 = "/capslockversion"
 SlashCmdList["CAPSLOCK_VERSION"] = function(msg)
 	if CAPSLOCK_IsInRaid() or CAPSLOCK_IsInParty() then
@@ -192,11 +186,11 @@ SlashCmdList["CAPSLOCK_VERSION"] = function(msg)
 end
 
 --[[
-	Open CAPSLOCK summon dialog
-	Syntax: /capslock
-	Alternative: /caps
-	Added in: 0.0.1
-]]
+--	SHow/hide CAPSLOCK summon dialog
+--	Syntax: /capslock
+--	Alternative: /caps
+--	Added in: 0.0.1
+--]]
 CAPSLOCK_TOGGLE_SUMMON1 = "/capslock"
 CAPSLOCK_TOGGLE_SUMMON2 = "/caps"
 SlashCmdList["CAPSLOCK_TOGGLE_SUMMON"] = function(msg)
@@ -205,21 +199,47 @@ SlashCmdList["CAPSLOCK_TOGGLE_SUMMON"] = function(msg)
 	end;
 end
 
+--[[
+--	Show CAPSLOCK summon dialog
+--	Syntax: /capsshow
+--	Alternative: /caps show
+--	Added in: 0.0.1
+--]]
+CAPSLOCK_SHOW_SUMMON = "/capsshow"
+SlashCmdList["CAPSLOCK_SHOW_SUMMON"] = function(msg)
+	if CAPSLOCK_IsWarlock() then
+		CAPSLOCK_OpenConfigurationDialog();
+	end;
+end
 
 --[[
-	Show HELP options
-	Syntax: /capslockhelp
-	Alternative: /capslock help
-	Added in: 0.0.1
-]]
+--	Hide CAPSLOCK summon dialog
+--	Syntax: /capshide
+--	Alternative: /caps hide
+--	Added in: 0.0.1
+--]]
+CAPSLOCK_HIDE_SUMMON = "/capshide"
+SlashCmdList["CAPSLOCK_HIDE_SUMMON"] = function(msg)
+	if CAPSLOCK_IsWarlock() then
+		CAPSLOCK_CloseConfigurationDialog();
+	end;
+end
+
+--[[
+--	Show HELP options
+--	Syntax: /capslockhelp
+--	Alternative: /capslock help
+--	Added in: 0.0.1
+--]]
 SLASH_CAPSLOCK_HELP1 = "/capslockhelp"
 SlashCmdList["CAPSLOCK_HELP"] = function(msg)
 	CAPSLOCK_Echo(string.format("CAPSLOCK version %s - by Mimma @ vanillagaming.org", GetAddOnMetadata("Capslock", "Version")));
 	CAPSLOCK_Echo("Syntax:");
 	CAPSLOCK_Echo("    /capslock [option]");
 	CAPSLOCK_Echo("Where options can be:");
-	CAPSLOCK_Echo("    Open         (Default) Open/close the CAPSLOCK dialog");
-	CAPSLOCK_Echo("    Summon       Summon next target.");
+	CAPSLOCK_Echo("    Show         (Default) Show/hide the CAPSLOCK dialog");
+	CAPSLOCK_Echo("    Summon       Summon next target. If a <target> is added,");
+	CAPSLOCK_Echo("                 that target will be summoned immediately.");
 	CAPSLOCK_Echo("    Help         This help.");
 	CAPSLOCK_Echo("    Version      Request version info from all clients.");
 end
@@ -399,6 +419,45 @@ end;
 --	Internal Communication Functions
 --
 --  *******************************************************
+--[[
+	Handle incoming message from other CAPSLOCK clients.
+	Added in: 0.0.1
+--]]
+function CAPSLOCK_HandleCapslockMessage(msg, sender)
+	--echo(sender.." --> "..msg);
+	local _, _, cmd, message, recipient = string.find(msg, "([^#]*)#([^#]*)#([^#]*)");	
+	
+	--	Ignore message if it is not for me. 
+	--	Receipient can be blank, which means it is for everyone.
+	if not (recipient == "") then
+		if not (recipient == UnitName("player")) then
+			return
+		end
+	end
+
+	if cmd == "TX_VERSION" then
+		CAPSLOCK_HandleTXVersion(message, sender)
+	elseif cmd == "RX_VERSION" then
+		CAPSLOCK_HandleRXVersion(message, sender)		
+	elseif cmd == "TX_SYNCINIT" then
+		CAPSLOCK_HandleTXSyncInit(message, sender)
+	elseif cmd == "RX_SYNCINIT" then
+		CAPSLOCK_HandleRXSyncInit(message, sender)
+	elseif cmd == "TX_SYNCADDQ" then
+		CAPSLOCK_HandleTXSyncAddQueue(message, sender)
+	elseif cmd == "TX_SYNCREMQ" then
+		CAPSLOCK_HandleTXSyncRemoveQueue(message, sender)
+	elseif cmd == "TX_SYNCSUMQ" then
+		CAPSLOCK_HandleTXSyncSummonQueue(message, sender)
+	elseif cmd == "RX_SYNCSUMQ" then
+		CAPSLOCK_HandleRXSyncSummonQueue(message, sender)
+	elseif cmd == "TX_SUMBEGIN" then
+		CAPSLOCK_HandleTXSyncStartSummon(message, sender)
+	elseif cmd == "TX_VERCHECK" then
+		CAPSLOCK_HandleTXVerCheck(message, sender)
+	end
+end
+
 
 function CAPSLOCK_SendAddonMessage(message)
 	local channel = nil
@@ -426,46 +485,6 @@ end
 
 
 --[[
-	Handle incoming message from other CAPSLOCK clients.
-	Added in: 0.0.1
---]]
-function CAPSLOCK_HandleCapslockMessage(msg, sender)
-	--echo(sender.." --> "..msg);
-	local _, _, cmd, message, recipient = string.find(msg, "([^#]*)#([^#]*)#([^#]*)");	
-	
-	--	Ignore message if it is not for me. 
-	--	Receipient can be blank, which means it is for everyone.
-	if not (recipient == "") then
-		if not (recipient == UnitName("player")) then
-			return
-		end
-	end
-
-	if cmd == "TX_VERSION" then
-		HandleTXVersion(message, sender)
-	elseif cmd == "RX_VERSION" then
-		HandleRXVersion(message, sender)		
-	elseif cmd == "TX_SYNCINIT" then
-		CAPSLOCK_HandleTXSyncInit(message, sender)
-	elseif cmd == "RX_SYNCINIT" then
-		CAPSLOCK_HandleRXSyncInit(message, sender)
-	elseif cmd == "TX_SYNCADDQ" then
-		CAPSLOCK_HandleTXSyncAddQueue(message, sender)
-	elseif cmd == "TX_SYNCREMQ" then
-		CAPSLOCK_HandleTXSyncRemoveQueue(message, sender)
-	elseif cmd == "TX_SYNCSUMQ" then
-		CAPSLOCK_HandleTXSyncSummonQueue(message, sender)
-	elseif cmd == "RX_SYNCSUMQ" then
-		CAPSLOCK_HandleRXSyncSummonQueue(message, sender)
-	elseif cmd == "TX_SUMBEGIN" then
-		CAPSLOCK_HandleRXSyncStartSummon(message, sender)
-	elseif cmd == "TX_VERCHECK" then
-		HandleTXVerCheck(message, sender)
-	end
-end
-
-
---[[
 	Respond to a TX_VERSION command.
 	Input:
 		msg is the raw message
@@ -474,7 +493,7 @@ end
 	We therefore generate a response back (RX) in raid with the syntax:
 	Capslock:<sender (which is actually the receiver!)>:<version number>
 ]]
-local function HandleTXVersion(message, sender)
+function CAPSLOCK_HandleTXVersion(message, sender)
 	local response = GetAddOnMetadata("Capslock", "Version")	
 	CAPSLOCK_SendAddonMessage("RX_VERSION#"..response.."#"..sender)
 end
@@ -482,12 +501,11 @@ end
 --[[
 	A version response (RX) was received. The version information is displayed locally.
 ]]
-local function HandleRXVersion(message, sender)
+function CAPSLOCK_HandleRXVersion(message, sender)
 	CAPSLOCK_Echo(string.format("%s is using CAPSLOCK version %s", sender, message))
 end
 
-local function HandleTXVerCheck(message, sender)
---	echo(string.format("HandleTXVerCheck: msg=%s, sender=%s", message, sender));
+function CAPSLOCK_HandleTXVerCheck(message, sender)
 	CAPSLOCK_CheckIsNewVersion(message);
 end
 
@@ -613,7 +631,7 @@ end
 --	A client started to summon; remove this entry from queue.
 --	Added in: 0.3.0
 --]]
-function CAPSLOCK_HandleRXSyncStartSummon(message, sender)
+function CAPSLOCK_HandleTXSyncStartSummon(message, sender)
 	local _, _, playername = string.find(message, "([^/]*)");
 
 	CAPSLOCK_RemoveFromQueue(playername);
@@ -690,8 +708,8 @@ end
 --  *******************************************************
 
 --[[
-	Add a player to the summon queue.
-	Added in: 0.0.2
+--	Add a player to the summon queue.
+--	Added in: 0.0.2
 --]]
 function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 		
@@ -750,8 +768,8 @@ end
 
 
 --[[
-	Get queue information for requested player.
-	Added in: 0.0.2
+--	Get queue information for requested player.
+--	Added in: 0.0.2
 --]]
 function CAPSLOCK_GetFromQueueByName(playername)
 	local target;
@@ -767,8 +785,8 @@ end
 
 
 --[[
-	Get queue information for player with highest priority.
-	Added in: 0.0.2
+--	Get queue information for player with highest priority.
+--	Added in: 0.0.2
 --]]
 function CAPSLOCK_GetFromQueueByPriority()
 	local entry = nil;
@@ -798,9 +816,9 @@ end;
 
 
 --[[
-	Return player status for one player: 
-	0=ready, 1=Offline, 2=Dead, 3=Not in Instance
-	Added in: 0.1.1
+--	Return player status for one player: 
+--	0=ready, 1=Offline, 2=Dead, 3=Not in Instance
+--	Added in: 0.1.1
 --]]
 function CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid)
 	-- Status 1: Unit is offline
@@ -825,9 +843,8 @@ end
 
 
 --[[
-	Return player status for all players in queue:
-	0=ready, 1=Offline, 2=Dead, 3=Not in Instance
-	Added in: 0.1.1
+--	Return player status for all players in queue:
+--	Added in: 0.1.1
 --]]
 function CAPSLOCK_UpdateQueueStatus()
 	local lockInstance = "";	
@@ -866,9 +883,9 @@ end;
 --  *******************************************************
 
 --[[
-	Summon next target in priority.
-	(optional) playername: set if specific player is to be summoned.
-	Added in: 0.0.2
+--	Summon next target in priority.
+--	(optional) playername: set if specific player is to be summoned.
+--	Added in: 0.0.2
 --]]
 function CAPSLOCK_SummonPriorityTarget(playername)
 	if not CAPSLOCK_IsInRaid() and not CAPSLOCK_IsInParty() then
@@ -922,8 +939,8 @@ end
 
 
 --[[
-	Summon specific target.
-	Added in: 0.1.1
+--	Summon specific target.
+--	Added in: 0.1.1
 --]]
 function CAPSLOCK_OnTargetClick(object, buttonname)
 	currentObjectId = object:GetID();
@@ -950,9 +967,9 @@ end;
 
 
 --[[
-	Announce summon instructions in party/raid.
-	Will check if there are at least 3 persons within 100 yards range.
-	Added in: 0.0.1
+--	Announce summon instructions in party/raid.
+--	Will check if there are at least 3 persons within 100 yards range.
+--	Added in: 0.0.1
 --]]
 function CAPSLOCK_AnnounceSummoning(playername)
 	local message = string.format("Summoning %s, please click the portal", playername);
@@ -1060,9 +1077,9 @@ end
 --  *******************************************************
 
 --[[
-	Return zonename where <playername> currently is.
-	Returned value is nil if no zone was found (e.g. due to being offline).
-	Added in: 0.1.0
+--	Return zonename where <playername> currently is.
+--	Returned value is nil if no zone was found (e.g. due to being offline).
+--	Added in: 0.1.0
 --]]
 function CAPSLOCK_GetPlayerZone(playername)
 	if CAPSLOCK_IsInRaid() then
@@ -1113,9 +1130,9 @@ end;
 --  *******************************************************
 
 --[[
-	Broadcast my version if this is not a beta (CurrentVersion > 0) and
-	my version has not been identified as being too low (MessageShown = false)
-]]
+--	Broadcast my version if this is not a beta (CurrentVersion > 0) and
+--	my version has not been identified as being too low (MessageShown = false)
+--]]
 function CAPSLOCK_OnRaidRosterUpdate(event, arg1, arg2, arg3, arg4, arg5)
 	if CAPSLOCK_CURRENT_VERSION > 0 and not CAPSLOCK_UPDATE_MESSAGE_SHOWN then
 		if CAPSLOCK_IsInRaid() or CAPSLOCK_IsInParty() then

@@ -1,4 +1,15 @@
 
+
+TODO: Add "/resummon" or "/requeue" to put last summoned target back in queue manually.
+TODO: Add "summon master", so targets are not spam-whispered!
+TODO: Add priority to locks
+TODO: Add priority based on distance
+TODO: Add "auto-fill" based on distance
+TODO: Add configuration / configurable messages
+TODO: Add shard counter
+
+
+
 Changelog:
 
 Release 0.3.x (2018-04-04)
