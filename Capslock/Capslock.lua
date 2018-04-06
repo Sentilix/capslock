@@ -12,6 +12,9 @@ Please see the ReadMe.txt for addon details.
 ]]
 
 
+-- 0: No debug, 1: Skip range check and public channels
+local CAPSLOCK_DEBUGMODE			= 0;
+
 -- Channel settings:
 local PARTY_CHANNEL					= "PARTY"
 local RAID_CHANNEL					= "RAID"
@@ -29,6 +32,14 @@ local CTRA_PREFIX					= "CTRA"
 --	Sync.state: 0=idle, 1=initializing, 2=synchronizing
 local synchronizationState			= 0;
 local synchronizationSource			= "";
+
+-- Priority settings:
+-- Should there be a special priority for Warlocks with CAPSLOCK installed?
+local CAPSLOCK_PRIORITY_WARLOCKS	= 90;
+local CAPSLOCK_PRIORITY_NORMAL		= 10;
+local CAPSLOCK_PRIORITY_IGNORED		= 0;		-- 0: Dead or in other ways preventing a summon
+
+
 -- To be configurable:
 --	Update player status each <n> second:
 CAPSLOCK_OPTION_PLAYER_UPDATE		= 2;
@@ -48,6 +59,7 @@ local CAPSLOCK_SUMMON_QUEUE			= {}
 local CAPSLOCK_SUMMON_KEYWORD		= "123"
 local CAPSLOCK_SUMMON_MAXVISIBLE	= 6
 local CAPSLOCK_SUMMON_MAXQUEUED		= 40
+local CAPSLOCK_SUMMON_LASTTARGET	= "";
 -- TRUE if summon dialog is open. "!summon" will always be accepted/queued.
 local CAPSLOCK_SUMMON_ENABLED		= false;
 
@@ -89,12 +101,12 @@ end
 --	Whisper specific target with a message.
 --	Added in: 0.0.1
 --]]
- function CAPSLOCK_Whisper(receiver, msg)
+function CAPSLOCK_Whisper(receiver, msg)
 	if receiver == UnitName("player") then
 		CAPSLOCK_Echo(msg);
 	else
 		SendChatMessage(msg, WHISPER_CHANNEL, nil, receiver);
-	end
+	end;
 end
 
 
@@ -124,6 +136,8 @@ SlashCmdList["CAPSLOCK_CAPSLOCK"] = function(msg)
 		
 	if (option == "SUM" or option == "SUMMON") then
 		SlashCmdList["CAPSLOCK_SUMMON"]();
+	elseif option == "RESUMMON" then
+		SlashCmdList["CAPSLOCK_RESUMMON"]();
 	elseif option == "SHOW" then
 		SlashCmdList["CAPSLOCK_SHOW_SUMMON"]();
 	elseif option == "HIDE" then
@@ -153,7 +167,6 @@ SLASH_CAPSLOCK_SUMMON2 = "/capssum"
 SLASH_CAPSLOCK_SUMMON3 = "/summon"
 SlashCmdList["CAPSLOCK_SUMMON"] = function(msg)
 	if CAPSLOCK_IsWarlock() then
-		
 		local _, _, playername = string.find(msg, "(%S*)");
 		if playername == "" then
 			CAPSLOCK_SummonPriorityTarget();
@@ -167,6 +180,23 @@ SlashCmdList["CAPSLOCK_SUMMON"] = function(msg)
 				CAPSLOCK_Echo(string.format("%s is not in the raid/party!", playername));
 			end;		
 		end;
+	end;
+end
+
+
+--[[
+--	Summon last target again ("resummons").
+--	Syntax: /capslockresummon
+--	Alternatives: /capsresum, /resummon, /resum
+--	Added in: 0.3.2
+--]]
+SLASH_CAPSLOCK_RESUMMON1 = "/capslockresummon"
+SLASH_CAPSLOCK_RESUMMON2 = "/capsresum"
+SLASH_CAPSLOCK_RESUMMON3 = "/resummon"
+SLASH_CAPSLOCK_RESUMMON4 = "/resum"
+SlashCmdList["CAPSLOCK_RESUMMON"] = function(msg)
+	if CAPSLOCK_IsWarlock() then
+		CAPSLOCK_ResummonTarget();
 	end;
 end
 
@@ -240,6 +270,7 @@ SlashCmdList["CAPSLOCK_HELP"] = function(msg)
 	CAPSLOCK_Echo("    Show         (Default) Show/hide the CAPSLOCK dialog");
 	CAPSLOCK_Echo("    Summon       Summon next target. If a <target> is added,");
 	CAPSLOCK_Echo("                 that target will be summoned immediately.");
+	CAPSLOCK_Echo("    Resummon     Retry summon on last target.");
 	CAPSLOCK_Echo("    Help         This help.");
 	CAPSLOCK_Echo("    Version      Request version info from all clients.");
 end
@@ -287,7 +318,8 @@ function CAPSLOCK_IsInParty()
 	if not CAPSLOCK_IsInRaid() then
 		return ( GetNumPartyMembers() > 0 );
 	end
-	return false
+	
+	return false;
 end
 
 
@@ -409,8 +441,6 @@ function CAPSLOCK_RemoveFromQueue(playername)
 
 	CAPSLOCK_SUMMON_QUEUE = newTable;
 end;
-
-
 
 
 
@@ -724,46 +754,38 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 		if not silentMode then
 			CAPSLOCK_Whisper(playername, "Patience, you are already queued for a summon!");
 		end;
-	else
-		local id = 1 + table.getn(CAPSLOCK_SUMMON_QUEUE);
-		-- Currently priority is always 10. Location is updated later.
-		local priority = 10;
-		CAPSLOCK_SUMMON_QUEUE[id] = { playername, priority, 0 , "" };
-		
-		if not silentMode then
-			local lockInstance = "";
-			if IsInInstance() then
-				lockInstance = GetRealZoneText();
-			end;
-			local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);
-			local playerZone = CAPSLOCK_GetPlayerZone(UnitName(unitid))				
-			local status = CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid);
-		
-			if status == 1 then
-				-- Player is disconnected; don't send a message.
-			elseif status == 2 then
-				CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned when you are alive.", playername));
-			elseif status == 3 then
-				CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned when you are inside %s.", playername, lockInstance));
-			else
-				CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
-			end	
-		end;
-	end;	
+		return;
+	end;
 
-	CAPSLOCK_UpdateMessageList();
+	local id = 1 + table.getn(CAPSLOCK_SUMMON_QUEUE);
+	local priority = CAPSLOCK_GetSummonPriority(playername);	
 	
-	local priority = 10;
+	CAPSLOCK_SUMMON_QUEUE[id] = { playername, priority, 0 , "" };
 	CAPSLOCK_SendAddonMessage(string.format("TX_SYNCADDQ#%s/%d#", playername, priority));
+
+	CAPSLOCK_UpdateMessageList();	
+	
+	if not silentMode then
+		q = CAPSLOCK_GetFromQueueByName(playername);
+	
+		if q[3] == 1 then
+			-- Player is disconnected; don't send a message.
+		elseif q[3] == 2 then
+			CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned when you are alive.", playername));
+		elseif q[3] == 3 then
+			CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned when you are inside %s.", playername, GetRealZoneText()));
+		else
+			CAPSLOCK_Whisper(playername, string.format("Hi %s, you will be summoned shortly.", playername));
+		end	
+	end;
 
 		
 	-- Debug: print out current queue:
-	--[[
 	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
 		q = CAPSLOCK_SUMMON_QUEUE[n];
 		echo(string.format("Queue: pos=%d, name=%s, prio=%d, status=%d, loc=%s", n, q[1], q[2], q[3], q[4]));
 	end;
-	]]	
+	
 end
 
 
@@ -793,7 +815,7 @@ function CAPSLOCK_GetFromQueueByPriority()
 	local target;
 
 	CAPSLOCK_UpdateQueueStatus();
-	CAPSLOCK_SortTableAscending(CAPSLOCK_SUMMON_QUEUE, 1);
+	CAPSLOCK_SortTableDescending(CAPSLOCK_SUMMON_QUEUE, 2);
 	
 	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
 		target = CAPSLOCK_SUMMON_QUEUE[n];			
@@ -841,6 +863,33 @@ function CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid)
 	return 0;
 end
 
+--[[
+--	Return summon priority for specific player in queue.
+--	Since: 0.3.2
+--]]
+function CAPSLOCK_GetSummonPriority(playername)
+	playername = CAPSLOCK_UCFirst(playername);
+	
+	local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);
+	if not unitid then
+		return CAPSLOCK_PRIORITY_IGNORED;
+	end;
+
+	if UnitIsDeadOrGhost(unitid) then
+		return CAPSLOCK_PRIORITY_IGNORED;
+	end;
+	
+	if not UnitIsConnected(unitid) then
+		return CAPSLOCK_PRIORITY_IGNORED;
+	end;
+
+	if UnitClass(unitid) == "Warlock" then
+		return CAPSLOCK_PRIORITY_WARLOCKS;
+	end;
+
+	return CAPSLOCK_PRIORITY_NORMAL;
+end;
+
 
 --[[
 --	Return player status for all players in queue:
@@ -857,11 +906,18 @@ function CAPSLOCK_UpdateQueueStatus()
 	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
 		target = CAPSLOCK_SUMMON_QUEUE[n];
 		unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
+		status = CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid);		
+		playerZone = CAPSLOCK_GetPlayerZone(UnitName(unitid));
+		priority = target[2];
 		
-		playerZone = CAPSLOCK_GetPlayerZone(UnitName(unitid))				
-		target[3] = CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid);
+		if (status == 0) and (priority == CAPSLOCK_PRIORITY_IGNORED) then
+			priority = CAPSLOCK_GetSummonPriority(target[1]);
+		end;
+		
+		target[2] = priority
+		target[3] = status;
 		target[4] = playerZone;
-		
+
 		CAPSLOCK_SUMMON_QUEUE[n] = target;
 	end;
 end;
@@ -898,10 +954,12 @@ function CAPSLOCK_SummonPriorityTarget(playername)
 		return;
 	end
 
-	local nearbyCount = CAPSLOCK_CountNearbyPlayers();
-	if nearbyCount < 3 then
-		CAPSLOCK_Echo("There are not enough clickers nearby, please wait with summons.");
-		return;
+	if CAPSLOCK_DEBUGMODE == 0 then
+		local nearbyCount = CAPSLOCK_CountNearbyPlayers();
+		if nearbyCount < 3 then
+			CAPSLOCK_Echo("There are not enough clickers nearby, please wait with summons.");
+			return;
+		end;
 	end;
 
 	local target;
@@ -931,11 +989,48 @@ function CAPSLOCK_SummonPriorityTarget(playername)
 		return;
 	end
 
+	CAPSLOCK_StartSummon(unitid);
+end
+
+--[[
+--	Cast a summon on last summoned target (if any)
+--	Added in: 0.3.2
+--]]
+function CAPSLOCK_ResummonTarget()
+	local playername = CAPSLOCK_UCFirst(CAPSLOCK_SUMMON_LASTTARGET);
+
+	if playername == "" then
+		CAPSLOCK_Echo("Cannot re-summon: there is no target!");
+		return;
+	end;
+
+	local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);
+	if not unitid then
+		CAPSLOCK_Echo(string.format("Cannot re-summon: %s is not in the raid!", playername));
+		return;
+	end;
+
+	if not UnitIsConnected(unitid) then
+		CAPSLOCK_Echo(string.format("Cannot re-summon: %s is currently offline!", playername));
+		return;
+	end;
+	
+	if UnitIsDeadOrGhost(unitid) then
+		CAPSLOCK_Echo(string.format("Cannot re-summon: %s is currently dead!", playername));
+		return;
+	end;
+
+	CAPSLOCK_StartSummon(unitid);
+end;
+
+
+function CAPSLOCK_StartSummon(unitid)
 	TargetUnit(unitid);
 	CastSpellByName("Ritual of Summoning");
-
-	CAPSLOCK_AnnounceSummoning(target[1]);
-end
+	
+	CAPSLOCK_AnnounceSummoning(UnitName(unitid));	
+	CAPSLOCK_SUMMON_LASTTARGET =  UnitName(unitid);
+end;
 
 
 --[[
@@ -973,7 +1068,13 @@ end;
 --]]
 function CAPSLOCK_AnnounceSummoning(playername)
 	local message = string.format("Summoning %s, please click the portal", playername);
-	SendChatMessage(message, YELL_CHANNEL)
+	
+	if CAPSLOCK_DEBUGMODE == 0 then	
+		SendChatMessage(message, YELL_CHANNEL)
+	else
+		-- Debug mode: use party/raid chat for test output!
+		CAPSLOCK_PartyEcho(message);
+	end;
 
 	CAPSLOCK_Whisper(playername, "You will be summoned in 10 seconds - be ready.");
 end

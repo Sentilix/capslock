@@ -1,8 +1,10 @@
 
+0.3.x:
 
-TODO: Add "/resummon" or "/requeue" to put last summoned target back in queue manually.
+0.4.x:
 TODO: Add "summon master", so targets are not spam-whispered!
-TODO: Add priority to locks
+
+later:
 TODO: Add priority based on distance
 TODO: Add "auto-fill" based on distance
 TODO: Add configuration / configurable messages
@@ -12,12 +14,14 @@ TODO: Add shard counter
 
 Changelog:
 
-Release 0.3.x (2018-04-04)
+Release 0.3.x (2018-04-06)
 --------------------------
 * Added synchronization between locks in raid
+* Added "/resummon" to retry summon on last summoned target manually.
+* Added priority to locks.
 
 
-Release 0.2.x (2018-04-03)
+Release 0.2.x (2018-04-04)
 --------------------------
 * Added zones and locations
 * Finalized slash commands
