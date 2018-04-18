@@ -2,6 +2,9 @@
 0.3.x:
 
 0.4.x:
+UI finalized (for now ...)
+
+0.5.x:
 TODO: Add "summon master", so targets are not spam-whispered!
 
 later:

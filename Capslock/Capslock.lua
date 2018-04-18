@@ -35,21 +35,21 @@ local synchronizationSource			= "";
 
 -- Priority settings:
 -- Should there be a special priority for Warlocks with CAPSLOCK installed?
-local CAPSLOCK_PRIORITY_WARLOCKS	= 90;
-local CAPSLOCK_PRIORITY_NORMAL		= 10;
-local CAPSLOCK_PRIORITY_IGNORED		= 0;		-- 0: Dead or in other ways preventing a summon
+local CAPSLOCK_PRIORITY_WARLOCKS		= 90;
+local CAPSLOCK_PRIORITY_NORMAL			= 10;
+local CAPSLOCK_PRIORITY_IGNORED			= 0;		-- 0: Dead or in other ways preventing a summon
 
 
 -- To be configurable:
 --	Update player status each <n> second:
-CAPSLOCK_OPTION_PLAYER_UPDATE		= 2;
+CAPSLOCK_OPTION_PLAYER_UPDATE				= 2;
 
 -- Globals:
-CAPSLOCK_TITAN_ID					= "Capslock"
-CAPSLOCK_TITAN_TITLE				= "CAPSLOCK"
-CAPSLOCK_AND_TITAN_LOADED			= 0
+CAPSLOCK_TITAN_ID										= "Capslock"
+CAPSLOCK_TITAN_TITLE								= "CAPSLOCK"
+CAPSLOCK_AND_TITAN_LOADED						= 0
 
-local CAPSLOCK_CURRENT_VERSION		= 0
+local CAPSLOCK_CURRENT_VERSION			= 0
 local CAPSLOCK_UPDATE_MESSAGE_SHOWN = false
 
 -- List of people (in raid) requesting a summon.
@@ -340,7 +340,6 @@ function CAPSLOCK_UCFirst(msg)
 	local r = string.sub(msg, 2)
 	return string.upper(f) .. string.lower(r)
 end
-
 
 function CAPSLOCK_SortTableAscending(sourcetable, index)
 	local doSort = true
@@ -780,12 +779,11 @@ function CAPSLOCK_AddToSummonQueue(playername, silentMode)
 	end;
 
 		
-	-- Debug: print out current queue:
-	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
-		q = CAPSLOCK_SUMMON_QUEUE[n];
-		echo(string.format("Queue: pos=%d, name=%s, prio=%d, status=%d, loc=%s", n, q[1], q[2], q[3], q[4]));
-	end;
-	
+-- Debug: print out current queue:
+--	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+--		q = CAPSLOCK_SUMMON_QUEUE[n];
+--		echo(string.format("Queue: pos=%d, name=%s, prio=%d, status=%d, loc=%s", n, q[1], q[2], q[3], q[4]));
+--	end;	
 end
 
 
@@ -903,23 +901,63 @@ function CAPSLOCK_UpdateQueueStatus()
 		lockInstance = GetRealZoneText();
 	end;
 	
-	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
-		target = CAPSLOCK_SUMMON_QUEUE[n];
-		unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
-		status = CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid);		
-		playerZone = CAPSLOCK_GetPlayerZone(UnitName(unitid));
-		priority = target[2];
-		
-		if (status == 0) and (priority == CAPSLOCK_PRIORITY_IGNORED) then
-			priority = CAPSLOCK_GetSummonPriority(target[1]);
-		end;
-		
-		target[2] = priority
-		target[3] = status;
-		target[4] = playerZone;
+	local queueWasModified = false;
+	for n,target in ipairs(CAPSLOCK_SUMMON_QUEUE) do
+--	for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+--		target = CAPSLOCK_SUMMON_QUEUE[n];
 
-		CAPSLOCK_SUMMON_QUEUE[n] = target;
+		unitid = CAPSLOCK_GetUnitIDFromGroup(target[1]);
+		if unitid then		
+			status = CAPSLOCK_GetPlayerStatus(lockInstance, playerZone, unitid);		
+			playerZone = CAPSLOCK_GetPlayerZone(UnitName(unitid));
+			priority = target[2];
+		
+			if (status == 0) and (priority == CAPSLOCK_PRIORITY_IGNORED) then
+				priority = CAPSLOCK_GetSummonPriority(target[1]);
+			end;
+		
+			target[2] = priority
+			target[3] = status;
+			target[4] = playerZone;
+
+			CAPSLOCK_SUMMON_QUEUE[n] = target;
+		else		
+			-- Player not found (left raid?)
+			-- Remove him from queue!
+			CAPSLOCK_SUMMON_QUEUE[n] = { '', -1, -1, ''};
+			queueWasModified = true;
+		end;
 	end;
+
+	if queueWasModified then		
+		local index = 1;
+		local temptable = { };
+		local q
+		for n=1, table.getn(CAPSLOCK_SUMMON_QUEUE), 1 do
+			q = CAPSLOCK_SUMMON_QUEUE[n];
+			if q[2] >= 0 then
+				temptable[index] = q;
+				index = index + 1;
+			end;
+		end
+		CAPSLOCK_SUMMON_QUEUE = temptable;	
+		CAPSLOCK_LocationTimer = 0;
+	end;
+end;
+
+
+-- Debug: print out current queue:
+function CAPSLOCK_DebugQueue(message)
+	echo(string.format("***** %s", message));
+	for key,value in ipairs(CAPSLOCK_SUMMON_QUEUE) do
+		value = CAPSLOCK_SUMMON_QUEUE[key];
+		if not value then
+			echo(string.format("Queue: Pos=%d, q=nil", 1*key));
+		else
+			echo(string.format("Queue: pos=%d, name=%s, prio=%d, status=%d, loc=%s", 1*key, value[1], value[2], value[3], value[4]));
+		end;		
+	end;	
+	echo(string.format("----- Size: %d", table.getn(CAPSLOCK_SUMMON_QUEUE)));
 end;
 
 
@@ -1025,13 +1063,23 @@ end;
 
 
 function CAPSLOCK_StartSummon(unitid)
-	TargetUnit(unitid);
+	ClearTarget();
+	TargetUnit(unitid, true);
 	CastSpellByName("Ritual of Summoning");
 	
 	CAPSLOCK_AnnounceSummoning(UnitName(unitid));	
 	CAPSLOCK_SUMMON_LASTTARGET =  UnitName(unitid);
 end;
 
+function CAPSLOCK_ShowButtonToolTip(object, message)
+	GameTooltip:SetOwner(object, "ANCHOR_PRESERVE");
+	GameTooltip:AddLine(message, 1, 1, 1);
+	GameTooltip:Show();
+end;
+
+function CAPSLOCK_HideButtonToolTip()
+	GameTooltip:Hide();
+end;
 
 --[[
 --	Summon specific target.
@@ -1100,12 +1148,13 @@ function CAPSLOCK_InitializeListElements()
 end
 
 
-function CAPSLOCK_RefreshVisibleSummonQueue(offset)
+function CAPSLOCK_RefreshVisibleSummonQueue(offset, skipUpdateQueue)
 	local summons = CAPSLOCK_SUMMON_QUEUE;
 
-	CAPSLOCK_UpdateQueueStatus();
-
-	CAPSLOCK_SortTableAscending(summons, 2);
+	if not skipUpdateQueue then	
+		CAPSLOCK_UpdateQueueStatus();
+		CAPSLOCK_SortTableAscending(summons, 2);
+	end;
 	
 	local summon, playername, playerprio, playerstatus;
 	for n=1, CAPSLOCK_SUMMON_MAXVISIBLE, 1 do
@@ -1137,25 +1186,27 @@ function CAPSLOCK_RefreshVisibleSummonQueue(offset)
 			else
 				-- Use class colour
 				local unitid = CAPSLOCK_GetUnitIDFromGroup(playername);						
-				local cls = UnitClass(unitid);
-				if cls == "Druid" then
-					clasColor = { 1.00, 0.49, 0.04 }
-				elseif cls == "Hunter" then
-					clasColor = { 0.67, 0.83, 0.45 }
-				elseif cls == "Mage" then
-					clasColor = { 0.41, 0.80, 0.94 }
-				elseif cls == "Paladin" then
-					clasColor = { 0.96, 0.55, 0.73 }
-				elseif cls == "Priest" then
-					clasColor = { 1.00, 1.00, 1.00 }
-				elseif cls == "Rogue" then
-					clasColor = { 1.00, 0.96, 0.41 }
-				elseif cls == "Shaman" then
-					clasColor = { 0.96, 0.55, 0.73 }
-				elseif cls == "Warlock" then
-					clasColor = { 0.58, 0.51, 0.79 }
-				elseif cls == "Warrior" then
-					clasColor = { 0.78, 0.61, 0.43 }
+				if unitid then				
+					local cls = UnitClass(unitid);
+					if cls == "Druid" then
+						clasColor = { 1.00, 0.49, 0.04 }
+					elseif cls == "Hunter" then
+						clasColor = { 0.67, 0.83, 0.45 }
+					elseif cls == "Mage" then
+						clasColor = { 0.41, 0.80, 0.94 }
+					elseif cls == "Paladin" then
+						clasColor = { 0.96, 0.55, 0.73 }
+					elseif cls == "Priest" then
+						clasColor = { 1.00, 1.00, 1.00 }
+					elseif cls == "Rogue" then
+						clasColor = { 1.00, 0.96, 0.41 }
+					elseif cls == "Shaman" then
+						clasColor = { 0.96, 0.55, 0.73 }
+					elseif cls == "Warlock" then
+						clasColor = { 0.58, 0.51, 0.79 }
+					elseif cls == "Warrior" then
+						clasColor = { 0.78, 0.61, 0.43 }
+					end;
 				end;			
 			end;		
 						
@@ -1322,6 +1373,8 @@ function CAPSLOCK_OnEvent(event)
 		CAPSLOCK_OnChatMsgAddon(event, arg1, arg2, arg3, arg4, arg5)
 	elseif (event == "CHAT_MSG_WHISPER") then
 		CAPSLOCK_OnChatWhisper(event, arg1, arg2, arg3, arg4, arg5);
+	elseif (event == "RAID_ROSTER_UPDATE") then
+		CAPSLOCK_UpdateMessageList();
 	elseif (event == "CHAT_MSG_RAID" or 
 			event == "CHAT_MSG_RAID_LEADER" or
 			event == "CHAT_MSG_PARTY") then

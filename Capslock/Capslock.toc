@@ -1,5 +1,5 @@
 ## Title: Capslock
-## Version: 0.3.2
+## Version: 0.4.0-beta1
 ## Author: Mimma @ VanillaGaming.org
 ## OptionalDeps: Titan Panel
 ## Interface: 11200

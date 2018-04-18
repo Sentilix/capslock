@@ -57,7 +57,7 @@
 	<!-- Main configuration frame -->
 	<Frame name="CapslockFrame" parent="UIParent" toplevel="true" hidden="true">
 		<Size>
-			<AbsDimension x="300" y="220" />
+			<AbsDimension x="300" y="248" />
 		</Size>
 		<Anchors>
 			<Anchor point="TOPLEFT">
@@ -105,9 +105,60 @@
 					</OnShow>
 				</Scripts>
 			</ScrollFrame>
-
-			<!-- Summon button -->
-			<Button name="SummonButton" inherits="UIPanelButtonTemplate" movable="true" text="Summon next">
+			<!-- Summon button (icon) -->
+			<Button name="SummonButton" inherits="ActionButtonTemplate" frameStrata="HIGH" hidden="false">
+				<Size>
+					<AbsDimension x="64" y="64" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset>
+							<AbsDimension x="20" y="-136" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<NormalTexture file="Interface\Icons\Spell_Shadow_Twilight.blp" />
+				<PushedTexture file="Interface\Icons\Spell_Shadow_Teleport.blp" />
+				<Scripts>
+					<OnClick>
+						CAPSLOCK_SummonPriorityTarget();
+					</OnClick>
+					<OnEnter>
+						CAPSLOCK_ShowButtonToolTip(this, "Summon next player in the summon queue");
+					</OnEnter>
+					<OnLeave>
+						CAPSLOCK_HideButtonToolTip(this);
+					</OnLeave>
+				</Scripts>
+			</Button>
+			<!-- Announce button (icon) -->
+			<Button name="SummonButton" inherits="ActionButtonTemplate" frameStrata="HIGH" hidden="false">
+				<Size>
+					<AbsDimension x="64" y="64" />
+				</Size>
+				<Anchors>
+					<Anchor point="TOPLEFT">
+						<Offset>
+							<AbsDimension x="200" y="-136" />
+						</Offset>
+					</Anchor>
+				</Anchors>
+				<NormalTexture file="Interface\Icons\Ability_Druid_DemoralizingRoar.blp" />
+				<PushedTexture file="Interface\Icons\Ability_Druid_ChallangingRoar.blp" />
+				<Scripts>
+					<OnClick>
+						CAPSLOCK_AnnounceSummons();
+					</OnClick>
+					<OnEnter>
+						CAPSLOCK_ShowButtonToolTip(this, "Announce Summons in raid/party char");
+					</OnEnter>
+					<OnLeave>
+						CAPSLOCK_HideButtonToolTip(this);
+					</OnLeave>
+				</Scripts>
+			</Button>
+			<!-- Summon button - old implementation
+			<Button name="SummonButton2" inherits="UIPanelButtonTemplate" movable="true" text="Summon next">
 				<Size>
 					<AbsDimension x="160" y="23" />
 				</Size>
@@ -122,7 +173,8 @@
 					</OnClick>
 				</Scripts>
 			</Button>
-			<!-- Announce button -->
+			-->
+			<!-- Announce button - old implementation
 			<Button name="AnnounceButton" inherits="UIPanelButtonTemplate" movable="true" text="Announce Summons">
 				<Size>
 					<AbsDimension x="160" y="23" />
@@ -138,14 +190,15 @@
 					</OnClick>
 				</Scripts>
 			</Button>
+			-->
 			<!-- Close button -->
-			<Button name="CloseButton" inherits="UIPanelButtonTemplate" movable="true" text="Close Summoning">
+			<Button name="CloseButton" inherits="UIPanelButtonTemplate" movable="true" text="Close">
 				<Size>
-					<AbsDimension x="160" y="23" />
+					<AbsDimension x="80" y="23" />
 				</Size>
 				<Anchors>
 					<Anchor point="TOPLEFT">
-						<Offset x="70" y="-180" />
+						<Offset x="110" y="-210" />
 					</Anchor>
 				</Anchors>
 				<Scripts>
